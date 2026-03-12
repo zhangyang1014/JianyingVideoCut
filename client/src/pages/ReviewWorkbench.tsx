@@ -505,6 +505,174 @@ function ExportPanel({
 }
 
 // ============================================================
+// Scenario Info Panel (Right Column Top)
+// ============================================================
+const SCENARIO_META: Record<string, {
+  label: string;
+  color: string;
+  border: string;
+  bg: string;
+  rules: { code: string; name: string; desc: string }[];
+  targets: { host?: string; guest?: string; overall: string };
+}> = {
+  monologue_clean: {
+    label: "口播精修",
+    color: "text-amber-400",
+    border: "border-amber-500/30",
+    bg: "bg-amber-500/5",
+    rules: [
+      { code: "P1", name: "重说识别", desc: "开头5字相同→删前句" },
+      { code: "P2", name: "结巴切除", desc: "词级精准切除，零容忍" },
+      { code: "P3", name: "语气词分级", desc: "必删/酌情/保留三档" },
+      { code: "P5", name: "冗余压缩", desc: "同观点保留信息密度最高版" },
+      { code: "P7", name: "开头钩子", desc: "前5秒强制保护" },
+    ],
+    targets: { overall: "保留 60-80%" },
+  },
+  interview_compress: {
+    label: "访谈压缩",
+    color: "text-blue-400",
+    border: "border-blue-500/30",
+    bg: "bg-blue-500/5",
+    rules: [
+      { code: "I1", name: "问答闭环", desc: "Q&A成对，不可破坏" },
+      { code: "I2", name: "跨段去重", desc: "全文扫描语义重复" },
+      { code: "I3", name: "精华保护", desc: "金句/洞见无条件保留" },
+      { code: "I4", name: "主播精简", desc: "废话铺垫删除" },
+      { code: "I6", name: "情绪弧线", desc: "四节点保护" },
+    ],
+    targets: { host: "主播 20-30%", guest: "嘉宾 60-70%", overall: "整体 35-45%" },
+  },
+  highlight_reel: {
+    label: "精彩集锦",
+    color: "text-orange-400",
+    border: "border-orange-500/30",
+    bg: "bg-orange-500/5",
+    rules: [
+      { code: "H1", name: "高能识别", desc: "数字/反转/金句/情绪" },
+      { code: "H2", name: "前3秒钩子", desc: "最强内容冷开场" },
+      { code: "H3", name: "节奏加速", desc: "删除所有>0.5s停顿" },
+      { code: "H4", name: "情绪弧线", desc: "勾引→爆发→余韵" },
+      { code: "H5", name: "废话零容忍", desc: "语气词/过渡句全删" },
+    ],
+    targets: { overall: "保留 10-25%" },
+  },
+};
+
+function ScenarioInfoPanel({
+  task,
+  styleMode,
+  onStyleModeChange,
+  claudeKey,
+  onClaudeKeyChange,
+}: {
+  task: Task;
+  styleMode: "immersive" | "quick_cut";
+  onStyleModeChange: (m: "immersive" | "quick_cut") => void;
+  claudeKey: string;
+  onClaudeKeyChange: (k: string) => void;
+}) {
+  const meta = SCENARIO_META[task.task_type] || SCENARIO_META.monologue_clean;
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className={cn("border-b border-border shrink-0", meta.bg)}>
+      {/* Header */}
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className={cn("text-[10px] font-mono font-bold uppercase tracking-wider", meta.color)}>
+          {meta.label}
+        </span>
+        <span className="text-[10px] text-muted-foreground/50 ml-auto">
+          {meta.targets.overall}
+        </span>
+        <ChevronDown className={cn("w-3 h-3 text-muted-foreground/50 transition-transform", expanded && "rotate-180")} />
+      </button>
+
+      {/* Expanded: Rules + Config */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-3">
+          {/* Rules */}
+          <div className="space-y-1">
+            {meta.rules.map((r) => (
+              <div key={r.code} className="flex items-start gap-1.5">
+                <span className={cn("text-[10px] font-mono font-bold w-5 shrink-0 mt-0.5", meta.color)}>{r.code}</span>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-foreground/80 font-medium">{r.name}</span>
+                  <span className="text-[10px] text-muted-foreground/60 ml-1">{r.desc}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Style Mode */}
+          <div className="space-y-1">
+            <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">剪辑风格</p>
+            <div className="grid grid-cols-2 gap-1">
+              {(["immersive", "quick_cut"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => onStyleModeChange(m)}
+                  className={cn(
+                    "text-[10px] py-1 px-2 rounded border transition-all",
+                    styleMode === m
+                      ? cn("border-current font-medium", meta.color)
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {m === "immersive" ? "沉浸" : "快剪"}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground/40 leading-relaxed">
+              {styleMode === "immersive"
+                ? "气口150ms · 保留思考停顿"
+                : "气口80ms · 激进删除废话"}
+            </p>
+          </div>
+
+          {/* Claude Key */}
+          <div className="space-y-1">
+            <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">Claude API Key</p>
+            <Input
+              type="password"
+              value={claudeKey}
+              onChange={(e) => onClaudeKeyChange(e.target.value)}
+              placeholder="sk-ant-... (可选)"
+              className="h-6 text-[10px] bg-secondary/50 border-border"
+            />
+            <p className="text-[10px] text-muted-foreground/40">
+              {claudeKey ? "✓ 将使用 Claude 审计" : "未填写则用规则引擎"}
+            </p>
+          </div>
+
+          {/* Target retention */}
+          {(meta.targets.host || meta.targets.guest) && (
+            <div className="space-y-1 border-t border-border/30 pt-2">
+              <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">保留目标</p>
+              {meta.targets.host && (
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-muted-foreground">主播 (spk0)</span>
+                  <span className={meta.color}>{meta.targets.host.split(" ")[1]}</span>
+                </div>
+              )}
+              {meta.targets.guest && (
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-muted-foreground">嘉宾 (spk1)</span>
+                  <span className={meta.color}>{meta.targets.guest.split(" ")[1]}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // Review Workbench Main
 // ============================================================
 export default function ReviewWorkbench() {
@@ -520,6 +688,7 @@ export default function ReviewWorkbench() {
   const [consoleExpanded, setConsoleExpanded] = useState(true);
   const [showOnlyKept, setShowOnlyKept] = useState(false);
   const [claudeKey, setClaudeKey] = useState("");
+  const [styleMode, setStyleMode] = useState<"immersive" | "quick_cut">("immersive");
   const wsRef = useRef<WebSocket | null>(null);
   const segmentListRef = useRef<HTMLDivElement>(null);
 
@@ -601,7 +770,7 @@ export default function ReviewWorkbench() {
 
   const handleAudit = async () => {
     try {
-      await triggerAudit(taskId, { claude_api_key: claudeKey, style_mode: "immersive" });
+      await triggerAudit(taskId, { claude_api_key: claudeKey || undefined, style_mode: styleMode });
       toast.success("语义审计已启动");
       setConsoleExpanded(true);
       loadTask();
@@ -821,9 +990,19 @@ export default function ReviewWorkbench() {
           </div>
         </div>
 
-        {/* Right: Speaker Panel (25%) */}
-        <div className="w-56 shrink-0 overflow-hidden">
-          <SpeakerPanel task={task} />
+        {/* Right: Speaker Panel + Scenario Info (25%) */}
+        <div className="w-56 shrink-0 overflow-hidden flex flex-col">
+          {/* Scenario Info Banner */}
+          <ScenarioInfoPanel
+            task={task}
+            styleMode={styleMode}
+            onStyleModeChange={setStyleMode}
+            claudeKey={claudeKey}
+            onClaudeKeyChange={setClaudeKey}
+          />
+          <div className="flex-1 overflow-hidden">
+            <SpeakerPanel task={task} />
+          </div>
         </div>
       </div>
 

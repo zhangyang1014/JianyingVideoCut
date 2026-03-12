@@ -312,6 +312,7 @@ async def _run_audit_task(task_id: str, req: AuditRequest):
         updated_segments = await run_semantic_audit(
             segments=task.audit_segments,
             params=task.params,
+            task_type=task.task_type.value if task.task_type else None,
             api_key=req.claude_api_key,
             model=req.claude_model,
             style_mode=req.style_mode,

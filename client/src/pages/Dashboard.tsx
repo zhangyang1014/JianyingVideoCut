@@ -37,6 +37,10 @@ import {
   CheckCircle2,
   Zap,
   FileVideo,
+  Mic,
+  Users,
+  Flame,
+  ChevronRight,
 } from "lucide-react";
 import {
   fetchTasks,
@@ -203,6 +207,69 @@ function NewTaskDialog({
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Scenario definitions with rules preview
+  const SCENARIOS = [
+    {
+      id: "monologue_clean",
+      icon: <Mic className="w-4 h-4" />,
+      label: "口播精修",
+      tag: "Monologue Clean",
+      desc: "博主口播、知识分享、产品讲解",
+      target: "保留 60-80%，输出专业感",
+      color: "text-amber-400",
+      border: "border-amber-500/40",
+      bg: "bg-amber-500/5",
+      rules: [
+        { code: "P1", name: "重说识别", desc: "开头5字相同→删前句" },
+        { code: "P2", name: "结巴切除", desc: "词级精准切除，零容忍" },
+        { code: "P3", name: "语气词分级", desc: "必删/酌情/保留三档" },
+        { code: "P7", name: "开头钩子", desc: "前5秒强制保护" },
+        { code: "P8", name: "结尾收束", desc: "干净利落，保留CTA" },
+      ],
+      styleNote: "quick_cut: 气口80ms，全删语气词 | immersive: 气口150ms，保留情绪词",
+    },
+    {
+      id: "interview_compress",
+      icon: <Users className="w-4 h-4" />,
+      label: "访谈压缩",
+      tag: "Interview Compress",
+      desc: "主播×嘉宾对谈、播客、深度访谈",
+      target: "嘉宾保留60-70%，主播保留20-30%",
+      color: "text-blue-400",
+      border: "border-blue-500/40",
+      bg: "bg-blue-500/5",
+      rules: [
+        { code: "I1", name: "问答闭环", desc: "Q&A成对保护，不可破坏" },
+        { code: "I2", name: "跨段去重", desc: "全文扫描，保留信息密度最高版" },
+        { code: "I3", name: "精华保护", desc: "金句/洞见/情绪高峰无条件保留" },
+        { code: "I4", name: "主播精简", desc: "废话铺垫删除，保留核心提问" },
+        { code: "I6", name: "情绪弧线", desc: "保留开场/高峰/深度/升华四节点" },
+      ],
+      styleNote: "气口预留200ms/150ms | 停顿>1.5s保留（体现思考真实性）",
+    },
+    {
+      id: "highlight_reel",
+      icon: <Flame className="w-4 h-4" />,
+      label: "精彩集锦",
+      tag: "Highlight Reel",
+      desc: "抖音/B站/YouTube Shorts 爆款剪辑",
+      target: "保留 10-25%，1-3分钟高能输出",
+      color: "text-orange-400",
+      border: "border-orange-500/40",
+      bg: "bg-orange-500/5",
+      rules: [
+        { code: "H1", name: "高能识别", desc: "数字冲击/反转/金句/情绪爆发" },
+        { code: "H2", name: "前3秒钩子", desc: "最强内容强制冷开场" },
+        { code: "H3", name: "节奏加速", desc: "删除所有>0.5s停顿" },
+        { code: "H4", name: "情绪弧线", desc: "勾引→爆发→余韵→再勾引" },
+        { code: "H5", name: "废话零容忍", desc: "语气词/过渡句全删" },
+      ],
+      styleNote: "气口80ms/50ms | 每片段5-30秒 | 建议重新排序",
+    },
+  ];
+
+  const activeScenario = SCENARIOS.find(s => s.id === taskType);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -259,25 +326,76 @@ function NewTaskDialog({
             />
           </div>
 
-          {/* Task Type */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wider">任务类型</Label>
-            <Select value={taskType} onValueChange={setTaskType}>
-              <SelectTrigger className="bg-secondary border-border text-foreground">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-card border-border">
-                <SelectItem value="monologue_clean" className="text-foreground hover:bg-secondary">
-                  🎙️ 口播精修 — 自动清理废话
-                </SelectItem>
-                <SelectItem value="highlight_reel" className="text-foreground hover:bg-secondary">
-                  ⚡ 精彩集锦 — 高能爆发 1-3min
-                </SelectItem>
-                <SelectItem value="interview_compress" className="text-foreground hover:bg-secondary">
-                  🎤 访谈压缩 — 逻辑去重 10-20min
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Task Type — Scenario Cards */}
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wider">选择场景</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {SCENARIOS.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setTaskType(s.id)}
+                  className={cn(
+                    "relative flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 text-center transition-all duration-200",
+                    taskType === s.id
+                      ? `${s.border} ${s.bg} ${s.color}`
+                      : "border-border hover:border-border/80 text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <span className={taskType === s.id ? s.color : "text-muted-foreground"}>
+                    {s.icon}
+                  </span>
+                  <span className="text-xs font-medium leading-tight">{s.label}</span>
+                  {taskType === s.id && (
+                    <div className={cn("absolute -top-1 -right-1 w-2 h-2 rounded-full", s.color.replace("text-", "bg-"))} />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Active Scenario Detail Card */}
+            {activeScenario && (
+              <div className={cn("rounded-lg border p-3 space-y-2.5 transition-all duration-300", activeScenario.border, activeScenario.bg)}>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className={cn("text-xs font-semibold font-mono", activeScenario.color)}>
+                      {activeScenario.tag}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{activeScenario.desc}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground/60 text-right leading-tight">
+                    {activeScenario.target}
+                  </span>
+                </div>
+
+                {/* Rules Preview */}
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground/60 uppercase tracking-wider">核心规则</p>
+                  <div className="space-y-1">
+                    {activeScenario.rules.map((rule) => (
+                      <div key={rule.code} className="flex items-center gap-2">
+                        <span className={cn("text-xs font-mono font-bold w-6 shrink-0", activeScenario.color)}>
+                          {rule.code}
+                        </span>
+                        <span className="text-xs text-foreground/80 font-medium w-16 shrink-0">
+                          {rule.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground truncate">
+                          {rule.desc}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Style Note */}
+                <div className="border-t border-border/30 pt-2">
+                  <p className="text-xs text-muted-foreground/50 leading-relaxed">
+                    <span className="text-muted-foreground/70">气口策略：</span>
+                    {activeScenario.styleNote}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* File Drop Zone */}
