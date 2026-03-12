@@ -229,20 +229,20 @@ async def run_semantic_audit(
     params: TaskParams,
     task_type: Optional[str] = None,
     api_key: Optional[str] = None,
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "anthropic/claude-3.5-sonnet",
     style_mode: str = "immersive",
     log_callback: Optional[Callable] = None
 ) -> List[Segment]:
     """
-    Run semantic audit using Claude API with scenario-specific prompts.
+    Run semantic audit using Claude via OpenRouter API (OpenAI-compatible).
     Falls back to rule-based audit if API key not available.
 
     Args:
         segments: List of ASR segments to audit
         params: Task parameters (thresholds, rules, etc.)
         task_type: Scenario type ("monologue_clean", "interview_compress", "highlight_reel")
-        api_key: Claude API key (optional, falls back to env var)
-        model: Claude model to use
+        api_key: OpenRouter API key (optional, falls back to env var OPENROUTER_API_KEY)
+        model: Model name in OpenRouter format, e.g. "anthropic/claude-3.5-sonnet"
         style_mode: "quick_cut" or "immersive"
         log_callback: Async callback for real-time logging
     """
@@ -251,37 +251,90 @@ async def run_semantic_audit(
     if log_callback:
         await log_callback("info", "claude", f"开始语义审计 | 场景: {scenario_name} | 模型: {model}")
 
-    # Get API key from params or environment
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")
+    # Priority: passed key → OPENROUTER_API_KEY → ANTHROPIC_API_KEY (legacy)
+    key = (
+        api_key
+        or os.environ.get("OPENROUTER_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("CLAUDE_API_KEY")
+    )
 
     if not key:
         if log_callback:
-            await log_callback("warn", "claude", f"未找到 Claude API Key，使用规则引擎模拟审计（场景: {scenario_name}）")
+            await log_callback("warn", "claude", f"未找到 API Key，使用规则引擎模拟审计（场景: {scenario_name}）")
         return await _rule_based_audit(segments, params, task_type, log_callback)
 
-    try:
-        import anthropic
+    # Detect whether this is an OpenRouter key (sk-or-*) or Anthropic key (sk-ant-*)
+    use_openrouter = key.startswith("sk-or-") or bool(os.environ.get("OPENROUTER_API_KEY"))
 
-        client = anthropic.Anthropic(api_key=key)
+    # Load scenario-specific system prompt
+    system_prompt = load_system_prompt(task_type)
+    user_prompt = build_audit_prompt(segments, style_mode, task_type)
 
-        # Load scenario-specific system prompt
-        system_prompt = load_system_prompt(task_type)
-        user_prompt = build_audit_prompt(segments, style_mode, task_type)
-
-        if log_callback:
-            await log_callback(
-                "info", "claude",
-                f"发送 {len(segments)} 个片段给 Claude | 场景: {scenario_name} | 风格: {style_mode}"
-            )
-
-        message = client.messages.create(
-            model=model,
-            max_tokens=8192,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
+    if log_callback:
+        route = "OpenRouter" if use_openrouter else "Anthropic"
+        await log_callback(
+            "info", "claude",
+            f"发送 {len(segments)} 个片段 → {route} | 场景: {scenario_name} | 风格: {style_mode}"
         )
 
-        response_text = message.content[0].text
+    try:
+        response_text = None
+
+        if use_openrouter:
+            # ── OpenRouter path (OpenAI-compatible) ──────────────────────────
+            try:
+                import openai
+            except ImportError:
+                import subprocess, sys
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "openai", "-q"])
+                import openai
+
+            # Normalize model name: if user passes Anthropic native name, map it
+            _model_map = {
+                "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
+                "claude-3-5-haiku-20241022":  "anthropic/claude-3.5-haiku",
+                "claude-3-opus-20240229":      "anthropic/claude-3-opus",
+                "claude-3-sonnet-20240229":    "anthropic/claude-3-sonnet",
+            }
+            or_model = _model_map.get(model, model if "/" in model else f"anthropic/{model}")
+
+            client = openai.OpenAI(
+                api_key=key,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://github.com/zhangyang1014/JianyingVideoCut",
+                    "X-Title": "GoldenClip Video Workstation",
+                }
+            )
+
+            completion = client.chat.completions.create(
+                model=or_model,
+                max_tokens=8192,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ]
+            )
+            response_text = completion.choices[0].message.content
+
+        else:
+            # ── Anthropic native path ─────────────────────────────────────────
+            try:
+                import anthropic
+            except ImportError:
+                import subprocess, sys
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "anthropic", "-q"])
+                import anthropic
+
+            client = anthropic.Anthropic(api_key=key)
+            message = client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            response_text = message.content[0].text
 
         if log_callback:
             await log_callback("info", "claude", "Claude 响应已接收，正在解析...")
@@ -303,10 +356,6 @@ async def run_semantic_audit(
 
         return updated_segments
 
-    except ImportError:
-        if log_callback:
-            await log_callback("warn", "claude", "anthropic 库未安装，使用规则引擎模拟审计")
-        return await _rule_based_audit(segments, params, task_type, log_callback)
     except Exception as e:
         if log_callback:
             await log_callback("error", "claude", f"Claude API 错误: {str(e)}")
