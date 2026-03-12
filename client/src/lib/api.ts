@@ -285,6 +285,52 @@ export async function updateEditingAesthetic(content: string): Promise<void> {
 }
 
 // ============================================================
+// Prompt Management
+// ============================================================
+
+export interface PromptRule {
+  code: string;
+  name: string;
+  priority: number;
+  priority_note: string;
+  stars: string;
+  desc: string;
+  full_text: string;
+}
+
+export interface PromptData {
+  content: string;
+  rules: PromptRule[];
+}
+
+export type ScenarioKey = "monologue_clean" | "interview_compress" | "highlight_reel";
+
+export async function getPrompt(scenario: ScenarioKey): Promise<PromptData> {
+  const res = await fetch(`${API_BASE}/prompts/${scenario}`);
+  if (!res.ok) return { content: "", rules: [] };
+  return res.json();
+}
+
+export async function updatePromptContent(scenario: ScenarioKey, content: string): Promise<PromptData> {
+  const res = await fetch(`${API_BASE}/prompts/${scenario}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to save prompt");
+  return res.json();
+}
+
+export async function updatePromptRules(scenario: ScenarioKey, rules: PromptRule[]): Promise<void> {
+  const res = await fetch(`${API_BASE}/prompts/${scenario}/rules`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rules }),
+  });
+  if (!res.ok) throw new Error("Failed to save rules");
+}
+
+// ============================================================
 // WebSocket
 // ============================================================
 

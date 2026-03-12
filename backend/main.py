@@ -525,6 +525,140 @@ async def update_editing_aesthetic(body: dict):
 
 
 # ============================================================
+# Prompt Management API
+# ============================================================
+
+PROMPTS_DIR = BASE_DIR / "backend" / "prompts"
+
+SCENARIO_FILES = {
+    "monologue_clean": "monologue_clean.md",
+    "interview_compress": "interview_compress.md",
+    "highlight_reel": "highlight_reel.md",
+}
+
+
+@app.get("/api/prompts/{scenario}")
+async def get_prompt(scenario: str):
+    """Get the full prompt text for a scenario."""
+    if scenario not in SCENARIO_FILES:
+        raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario}")
+    path = PROMPTS_DIR / SCENARIO_FILES[scenario]
+    if not path.exists():
+        return {"content": "", "rules": []}
+    content = path.read_text(encoding="utf-8")
+    rules = _parse_rules_from_prompt(content)
+    return {"content": content, "rules": rules}
+
+
+@app.put("/api/prompts/{scenario}")
+async def update_prompt(scenario: str, body: dict):
+    """Save the full prompt text for a scenario."""
+    if scenario not in SCENARIO_FILES:
+        raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario}")
+    path = PROMPTS_DIR / SCENARIO_FILES[scenario]
+    content = body.get("content", "")
+    path.write_text(content, encoding="utf-8")
+    rules = _parse_rules_from_prompt(content)
+    return {"success": True, "rules": rules}
+
+
+@app.get("/api/prompts/{scenario}/rules")
+async def get_rules(scenario: str):
+    """Get parsed rules from a scenario prompt."""
+    if scenario not in SCENARIO_FILES:
+        raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario}")
+    path = PROMPTS_DIR / SCENARIO_FILES[scenario]
+    if not path.exists():
+        return {"rules": []}
+    content = path.read_text(encoding="utf-8")
+    return {"rules": _parse_rules_from_prompt(content)}
+
+
+@app.put("/api/prompts/{scenario}/rules")
+async def update_rules(scenario: str, body: dict):
+    """
+    Receive updated rules list and patch them back into the prompt file.
+    Each rule has: {code, name, priority, desc, logic, example}
+    """
+    if scenario not in SCENARIO_FILES:
+        raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario}")
+    path = PROMPTS_DIR / SCENARIO_FILES[scenario]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Prompt file not found")
+
+    rules = body.get("rules", [])
+    content = path.read_text(encoding="utf-8")
+    content = _patch_rules_into_prompt(content, rules)
+    path.write_text(content, encoding="utf-8")
+    return {"success": True, "rules": rules}
+
+
+def _parse_rules_from_prompt(content: str) -> list:
+    """
+    Parse structured rules from prompt markdown.
+    Looks for patterns like: ### 【P1】重说识别 ★★★ ...
+    Returns list of {code, name, priority, desc, logic, full_text}
+    """
+    import re
+    rules = []
+    # Match rule headers: ### 【CODE】Name ★...
+    pattern = re.compile(
+        r'###\s+【([A-Z0-9]+)】([^\n★]+)([★☆]*)([^\n]*)\n(.*?)(?=###\s+【|## |\Z)',
+        re.DOTALL
+    )
+    for m in pattern.finditer(content):
+        code = m.group(1).strip()
+        name = m.group(2).strip()
+        stars = m.group(3).strip()
+        priority_note = m.group(4).strip()
+        body = m.group(5).strip()
+
+        # Extract first paragraph as short desc
+        lines = [l.strip() for l in body.split('\n') if l.strip()]
+        desc = lines[0] if lines else ""
+        # Remove bold markers
+        desc = re.sub(r'\*\*([^*]+)\*\*', r'\1', desc)
+        if desc.startswith('**') or desc.startswith('触发') or desc.startswith('执行'):
+            desc = lines[1] if len(lines) > 1 else desc
+
+        priority = len([c for c in stars if c == '★'])
+
+        rules.append({
+            "code": code,
+            "name": name,
+            "priority": priority,
+            "priority_note": priority_note.strip('() '),
+            "stars": stars,
+            "desc": desc[:80] if desc else "",
+            "full_text": m.group(0).strip(),
+        })
+    return rules
+
+
+def _patch_rules_into_prompt(content: str, rules: list) -> str:
+    """
+    Replace individual rule sections in the prompt with updated versions.
+    Only updates rules that have a 'full_text' field provided.
+    """
+    import re
+    for rule in rules:
+        code = rule.get("code")
+        new_text = rule.get("full_text", "").strip()
+        if not code or not new_text:
+            continue
+        # Replace the old rule block with the new one
+        pattern = re.compile(
+            r'###\s+【' + re.escape(code) + r'】.*?(?=###\s+【|## |\Z)',
+            re.DOTALL
+        )
+        replacement = new_text + "\n\n"
+        new_content = pattern.sub(replacement, content)
+        if new_content != content:
+            content = new_content
+    return content
+
+
+# ============================================================
 # WebSocket for Real-time Logs
 # ============================================================
 
