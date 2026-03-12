@@ -1,0 +1,24 @@
+# GoldenClip Backend Dependencies
+# Run: pip install -r requirements.txt
+
+# Core Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+pydantic>=2.10.0
+
+# AI & ASR
+anthropic>=0.40.0
+faster-whisper>=1.1.0
+
+# Video Processing
+# FFmpeg is required as system dependency: sudo apt install ffmpeg
+# pyJianYingDraft for JianyingPro draft generation
+pyJianYingDraft>=0.2.5
+
+# Optional: Speaker Diarization
+# pyannote.audio>=3.3.0  # Requires HuggingFace token
+
+# Utilities
+python-dotenv>=1.0.0
+aiofiles>=24.1.0
