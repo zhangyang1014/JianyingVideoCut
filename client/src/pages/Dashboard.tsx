@@ -241,7 +241,7 @@ function NewTaskDialog({
     {
       id: "interview_compress",
       icon: <Users className="w-4 h-4" />,
-      label: "直播访谈压缩",
+      label: "访谈压缩",
       tag: "Interview Compress",
       desc: "主播×嘉宾对谈、播客、深度访谈",
       target: "嘉宾保留60-70%，主播保留20-30%",

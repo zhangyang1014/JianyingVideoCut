@@ -5391,7 +5391,7 @@ const SCENARIO_META: Record<string, {
     targets: { overall: "保留 60-80%" },
   },
   interview_compress: {
-    label: "直播访谈压缩",
+    label: "访谈压缩",
     color: "text-blue-400",
     border: "border-blue-500/30",
     bg: "bg-blue-500/5",
@@ -8196,7 +8196,7 @@ export default function ReviewWorkbench() {
                     )}
                     {task?.task_type === "interview_compress" && (
                       <>
-                        <p className="text-foreground/80 font-medium">直播访谈压缩规则：</p>
+                        <p className="text-foreground/80 font-medium">访谈压缩规则：</p>
                         <ul className="list-disc pl-4 space-y-1">
                           <li><span className="text-amber-400">Fragment</span> — 过短片段自动删除</li>
                           <li><span className="text-amber-400">Filler</span> — 纯语气词片段自动删除</li>

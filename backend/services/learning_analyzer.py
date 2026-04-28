@@ -19,7 +19,7 @@ PROMPT_REWRITE_PATH = PROMPTS_DIR / "prompt_rewrite.md"
 
 SCENARIO_LABELS = {
     "monologue_clean": "口播精修",
-    "interview_compress": "直播访谈压缩",
+    "interview_compress": "访谈压缩",
     "highlight_reel": "精彩集锦",
 }
 

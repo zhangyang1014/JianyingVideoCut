@@ -1309,7 +1309,7 @@ export const STATUS_COLORS: Record<TaskStatus, string> = {
 
 export const TASK_TYPE_LABELS: Record<string, string> = {
   highlight_reel: "精彩集锦",
-  interview_compress: "直播访谈压缩",
+  interview_compress: "访谈压缩",
   monologue_clean: "口播精修",
 };
 

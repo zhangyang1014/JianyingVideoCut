@@ -53,7 +53,7 @@ const SCENARIOS: {
   },
   {
     key: "interview_compress",
-    label: "直播访谈压缩",
+    label: "访谈压缩",
     sublabel: "Interview Compress",
     color: "text-blue-400",
     activeBg: "bg-blue-500/10",

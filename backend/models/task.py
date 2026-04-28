@@ -26,7 +26,7 @@ class TaskStatus(str, Enum):
 
 class TaskType(str, Enum):
     HIGHLIGHT_REEL = "highlight_reel"   # 精彩集锦 (1-3min)
-    INTERVIEW_COMPRESS = "interview_compress"  # 直播访谈压缩
+    INTERVIEW_COMPRESS = "interview_compress"  # 访谈压缩
     MONOLOGUE_CLEAN = "monologue_clean"  # 口播精修
 
 

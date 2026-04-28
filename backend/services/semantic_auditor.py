@@ -7,7 +7,7 @@ Flow: Tagged Script → Claude (Scenario Prompt) → JSON Audit Instructions
 
 Scenarios:
   - monologue_clean:     口播精修 (Prompt P1-P8)
-  - interview_compress:  直播访谈压缩 (Prompt I1-I8)
+  - interview_compress:  访谈压缩 (Prompt I1-I8)
   - highlight_reel:      精彩集锦 (Prompt H1-H5)
 """
 
@@ -197,7 +197,7 @@ delete片段: {delete_schema}
 def _get_scenario_name(task_type: Optional[str]) -> str:
     names = {
         "monologue_clean": "口播精修 (Monologue Clean)",
-        "interview_compress": "直播访谈压缩 (Live Interview Compress)",
+        "interview_compress": "访谈压缩 (Interview Compress)",
         "highlight_reel": "精彩集锦 (Highlight Reel)",
     }
     return names.get(task_type, "通用审计")

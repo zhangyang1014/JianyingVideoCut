@@ -103,7 +103,7 @@ const SCENARIOS: {
   {
     id: "interview_compress",
     icon: <Users className="w-6 h-6" />,
-    label: "直播访谈压缩",
+    label: "访谈压缩",
     tag: "Interview Compress",
     desc: "主播×嘉宾对谈、播客、深度访谈",
     color: "text-blue-400",

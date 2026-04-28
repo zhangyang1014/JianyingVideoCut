@@ -95,7 +95,7 @@ def _build_feedback_prompt(
     """构造提交给 Claude 的反馈分析 Prompt。"""
     scenario_labels = {
         "monologue_clean": "口播精修",
-        "interview_compress": "直播访谈压缩",
+        "interview_compress": "访谈压缩",
         "highlight_reel": "精彩集锦",
     }
     scenario_name = scenario_labels.get(task_type, task_type)
