@@ -43,7 +43,7 @@ style_mode: immersive         # 风格模式: quick_cut | immersive
 | 任务类型 | Prompt 文件 | 风格模式 | 目标时长 |
 |----------|-------------|----------|----------|
 | 精彩集锦 | semantic_audit.md | quick_cut | 1-3 分钟 |
-| 访谈压缩 | semantic_audit.md | immersive | 10-20 分钟 |
+| 直播访谈压缩 | semantic_audit.md | immersive | 10-20 分钟 |
 | 口播精修 | semantic_audit.md | immersive | 原时长 60-80% |
 
 ## Claude 模型配置

@@ -1,7 +1,7 @@
 /*
  * GoldenClip 智能视频工作站 — Global Styles
- * Design: 暗金剪辑台 · 编导美学 (Dark Gold Pro Edit Suite)
- * Color Philosophy: Near-black #0A0B0E + Gold #F0B429 accent
+ * Design: 深蓝剪辑台 · 编导美学 (Deep Blue Pro Edit Suite)
+ * Color Philosophy: Deep Navy #13151F + Gold #F0B429 accent (Cursor-inspired)
  * Typography: JetBrains Mono (timestamps/numbers) + Inter (body)
  */
 
@@ -55,50 +55,50 @@
   --color-keep: #16A34A;
   --color-delete: #DC2626;
   --color-pending: #D97706;
-  --color-spk0: #F0B429;
-  --color-spk1: #60A5FA;
-  --color-spk2: #34D399;
+  --color-spk0: #E8764A;
+  --color-spk1: #0EA5E9;
+  --color-spk2: #A78BFA;
   --color-spk3: #F472B6;
 }
 
-/* Dark Gold Theme — Default */
+/* Deep Blue Theme — Cursor-inspired — Default */
 :root {
   --radius: 0.5rem;
   
-  /* Background layers */
-  --background: oklch(0.09 0.005 260);        /* #0A0B0E near-black */
-  --foreground: oklch(0.93 0.005 65);          /* #F1F5F9 */
+  /* Background layers — 深海军蓝，类似 Cursor IDE (#1C1F32) */
+  --background: oklch(0.19 0.042 252);        /* ~#1C1F32 深蓝主背景 */
+  --foreground: oklch(0.92 0.010 220);         /* ~#DDE4F0 蓝白文字 */
   
   /* Card / Panel */
-  --card: oklch(0.12 0.006 260);              /* #111318 */
-  --card-foreground: oklch(0.93 0.005 65);
+  --card: oklch(0.23 0.040 252);              /* ~#21253E panel */
+  --card-foreground: oklch(0.92 0.010 220);
   
-  --popover: oklch(0.14 0.007 260);
-  --popover-foreground: oklch(0.93 0.005 65);
+  --popover: oklch(0.26 0.038 252);           /* ~#252A46 popup */
+  --popover-foreground: oklch(0.92 0.010 220);
   
   /* Primary = Gold */
   --primary: oklch(0.77 0.16 75);             /* #F0B429 gold */
-  --primary-foreground: oklch(0.09 0.005 260);
+  --primary-foreground: oklch(0.19 0.042 252);
   
-  /* Secondary = dark panel */
-  --secondary: oklch(0.16 0.007 260);         /* #1A1D24 */
-  --secondary-foreground: oklch(0.75 0.01 65);
+  /* Secondary = 次级面板 */
+  --secondary: oklch(0.27 0.038 252);         /* ~#272C48 */
+  --secondary-foreground: oklch(0.82 0.012 220);
   
   /* Muted */
-  --muted: oklch(0.18 0.006 260);
-  --muted-foreground: oklch(0.5 0.015 260);   /* #64748B */
+  --muted: oklch(0.29 0.035 252);             /* ~#2A2F4C */
+  --muted-foreground: oklch(0.82 0.012 240);  /* 更白的辅助文字，深蓝背景下可读 */
   
   /* Accent = subtle gold tint */
-  --accent: oklch(0.16 0.015 75);
+  --accent: oklch(0.26 0.025 75);
   --accent-foreground: oklch(0.77 0.16 75);
   
   /* Destructive = red */
   --destructive: oklch(0.55 0.22 27);         /* #DC2626 */
   --destructive-foreground: oklch(0.98 0 0);
   
-  /* Border */
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 10%);
+  /* Border — 蓝色微光边框 */
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.77 0.16 75 / 50%);
   
   /* Charts */
@@ -108,14 +108,14 @@
   --chart-4: oklch(0.65 0.18 220);
   --chart-5: oklch(0.65 0.18 320);
   
-  /* Sidebar */
-  --sidebar: oklch(0.10 0.006 260);
-  --sidebar-foreground: oklch(0.93 0.005 65);
+  /* Sidebar — 比主背景略深，形成层次感 */
+  --sidebar: oklch(0.16 0.040 252);           /* ~#181B2E */
+  --sidebar-foreground: oklch(0.92 0.010 220);
   --sidebar-primary: oklch(0.77 0.16 75);
-  --sidebar-primary-foreground: oklch(0.09 0.005 260);
-  --sidebar-accent: oklch(0.16 0.015 75);
+  --sidebar-primary-foreground: oklch(0.19 0.042 252);
+  --sidebar-accent: oklch(0.26 0.025 75);
   --sidebar-accent-foreground: oklch(0.77 0.16 75);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: oklch(0.77 0.16 75 / 50%);
 }
 
@@ -162,8 +162,8 @@
     border-left: 2px solid #F0B429;
   }
   
+  /* 底色由 inline style 注入（跟随说话人角色颜色），此处只保留左边框颜色 */
   .segment-keep {
-    background: rgba(22, 163, 74, 0.08);
     border-left: 3px solid #16A34A;
   }
   
@@ -171,6 +171,21 @@
     background: rgba(220, 38, 38, 0.08);
     border-left: 3px solid #DC2626;
     opacity: 0.6;
+  }
+
+  /* 字幕层修正：结巴去重，音频保留（琥珀色） */
+  .segment-subtitle-fix {
+    border-left: 3px solid #D97706;
+  }
+
+  /* ASR 识别错误纠正：音频保留，字幕显示修正后文本（天蓝色） */
+  .segment-text-fix {
+    border-left: 3px solid #0EA5E9;
+  }
+
+  /* 碎段合并：与下一段合并为一张字幕卡，视频保留（紫色） */
+  .segment-merge-next {
+    border-left: 3px solid #8B5CF6;
   }
   
   .segment-pending {
@@ -209,10 +224,11 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(240, 180, 41, 0.2);
+    background: rgba(100, 130, 200, 0.25);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {

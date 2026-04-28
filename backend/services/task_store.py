@@ -31,14 +31,31 @@ class TaskStore:
         self._tasks: Dict[str, Task] = {}
         self._load()
 
+    # 后端重启后这些状态的后台任务已不存在，需要回退到安全状态
+    _INTERRUPTED_STATUS_MAP = {
+        TaskStatus.ASR_RUNNING:    TaskStatus.PENDING,
+        TaskStatus.AUDIT_RUNNING:  TaskStatus.ASR_DONE,
+        TaskStatus.EXPORT_RUNNING: TaskStatus.REVIEW,
+    }
+
     def _load(self):
         if TASKS_FILE.exists():
             try:
                 with open(TASKS_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    needs_save = False
                     for task_data in data:
                         task = Task(**task_data)
+                        # 后端重启时，所有「运行中」状态的后台 asyncio 任务已被杀死，
+                        # 将这些任务回退到合适的安全状态，避免 UI 永久转圈
+                        if task.status in self._INTERRUPTED_STATUS_MAP:
+                            fallback = self._INTERRUPTED_STATUS_MAP[task.status]
+                            print(f"[TaskStore] 任务 {task.id[:8]}... 因重启从 {task.status} 回退至 {fallback}")
+                            task.status = fallback
+                            needs_save = True
                         self._tasks[task.id] = task
+                    if needs_save:
+                        self._save()
             except Exception as e:
                 print(f"[TaskStore] Failed to load tasks: {e}")
 

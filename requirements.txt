@@ -16,9 +16,20 @@ faster-whisper>=1.1.0
 # pyJianYingDraft for JianyingPro draft generation
 pyJianYingDraft>=0.2.5
 
-# Optional: Speaker Diarization
-# pyannote.audio>=3.3.0  # Requires HuggingFace token
+# 说话人分离（ModelScope CAM++，无需 HuggingFace token）
+modelscope>=1.18.0
+funasr>=1.1.0
+# modelscope 的隐式依赖（需手动声明）
+addict>=2.4.0
+simplejson>=3.19.0
+sortedcontainers>=2.4.0
+hdbscan>=0.8.33
+onnxruntime>=1.17.0
+# datasets 版本须 <3.0，否则与 modelscope 1.34 不兼容
+datasets>=2.0.0,<3.0.0
 
 # Utilities
 python-dotenv>=1.0.0
 aiofiles>=24.1.0
+httpx>=0.27.0
+openai>=1.40.0

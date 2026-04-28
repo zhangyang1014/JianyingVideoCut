@@ -10,8 +10,9 @@ import {
   LayoutGrid,
   Settings,
   Scissors,
-  Github,
   Zap,
+  Key,
+  GraduationCap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,8 +23,10 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { icon: LayoutGrid, label: "任务看板", href: "/" },
-  { icon: Settings, label: "配置管理", href: "/config" },
+  { icon: LayoutGrid,    label: "任务看板",   href: "/" },
+  { icon: GraduationCap, label: "学习",       href: "/learning" },
+  { icon: Key,           label: "API 配置",   href: "/config/api" },
+  { icon: Settings,      label: "Prompt 管理", href: "/config/prompts" },
 ];
 
 interface AppLayoutProps {
@@ -75,24 +78,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
           })}
         </nav>
 
-        {/* Bottom: GitHub link */}
-        <div className="flex flex-col items-center gap-1">
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <a
-                href="https://github.com/zhangyang1014/JianyingVideoCut"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-10 h-10 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-150"
-              >
-                <Github className="w-5 h-5" />
-              </a>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="bg-card border-border text-foreground">
-              GitHub 仓库
-            </TooltipContent>
-          </Tooltip>
-        </div>
       </aside>
 
       {/* Main Content */}

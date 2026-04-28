@@ -5,6 +5,10 @@
 export OPENROUTER_API_KEY="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"
 export CLAUDE_MODEL="anthropic/claude-3.5-sonnet"
 
+# FunASR / ModelScope 模型缓存目录，固定指向项目内 models/，避免重复下载
+SCRIPT_DIR_EARLY="$(cd "$(dirname "$0")" && pwd)"
+export MODELSCOPE_CACHE="${SCRIPT_DIR_EARLY}/models"
+
 # Load local overrides if present (create local.env to override keys without touching this file)
 if [ -f "$(dirname "$0")/local.env" ]; then
     source "$(dirname "$0")/local.env"
@@ -52,10 +56,10 @@ echo ""
 # Start server
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
-PYTHONPATH="$SCRIPT_DIR" setsid uvicorn backend.main:app \
+PYTHONPATH="$SCRIPT_DIR" python3 -m uvicorn backend.main:app \
     --host 0.0.0.0 \
     --port 8000 \
-    --workers 2 \
+    --workers 1 \
     --timeout-keep-alive 30 \
     > /tmp/goldenclip_backend.log 2>&1 &
 

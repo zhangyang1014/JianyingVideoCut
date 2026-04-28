@@ -12,13 +12,53 @@ Note: pyJianYingDraft supports JianYing 5+ for draft generation.
 
 import os
 import json
-from typing import List, Optional, Callable
+import re as _re
+from typing import List, Optional, Callable, Dict
 from pathlib import Path
 from datetime import datetime
 
-from ..models.task import Segment, SegmentAction
+from ..models.task import Segment, SegmentAction, TaskParams
 
 EXPORTS_DIR = Path(__file__).parent.parent.parent / "exports"
+
+
+def _get_subtitle_text(seg: Segment, params: Optional[TaskParams] = None) -> str:
+    """
+    计算段落最终字幕文本：
+    1. subtitle_fix / text_fix：使用 display_text（修正后文本）
+    2. show_speaker_label=True：在文本前追加 [说话人] 前缀
+    """
+    text = (seg.display_text or seg.text or "").strip()
+    if params and params.show_speaker_label and seg.speaker:
+        speaker_names: Dict[str, str] = params.speaker_names or {}
+        label = speaker_names.get(seg.speaker, seg.speaker)
+        text = f"[{label}] {text}"
+    return text
+
+
+def _find_line_break_time(seg: Segment) -> Optional[float]:
+    """
+    根据 subtitle_line_break 字段，在 words 中找到分行起始时间。
+    返回 None 表示未找到或未设置。
+    """
+    if not seg.subtitle_line_break or not seg.words:
+        return None
+    target_chars = [c for c in seg.subtitle_line_break if c.strip()]
+    if not target_chars:
+        return None
+    for w_idx, w in enumerate(seg.words):
+        raw = _re.sub(r'<[^>]*>', '', w.word).strip()
+        if raw == target_chars[0]:
+            match = True
+            for k, sc in enumerate(target_chars[1:], 1):
+                if w_idx + k < len(seg.words):
+                    nxt = _re.sub(r'<[^>]*>', '', seg.words[w_idx + k].word).strip()
+                    if nxt != sc:
+                        match = False
+                        break
+            if match:
+                return w.start
+    return None
 
 
 async def build_jianying_draft(
@@ -26,7 +66,8 @@ async def build_jianying_draft(
     segments: List[Segment],
     draft_name: str,
     draft_folder: Optional[str] = None,
-    log_callback: Optional[Callable] = None
+    log_callback: Optional[Callable] = None,
+    params: Optional[TaskParams] = None,
 ) -> Optional[str]:
     """
     Build a JianyingPro draft file from kept segments.
@@ -36,7 +77,9 @@ async def build_jianying_draft(
     
     Returns the path to the created draft folder.
     """
-    kept_segments = [s for s in segments if s.action == SegmentAction.KEEP]
+    # subtitle_fix / text_fix / merge_next 视频不剪切，与 keep 相同处理
+    _kept_actions = (SegmentAction.KEEP, SegmentAction.SUBTITLE_FIX, SegmentAction.TEXT_FIX, SegmentAction.MERGE_NEXT)
+    kept_segments = [s for s in segments if s.action in _kept_actions]
 
     if not kept_segments:
         if log_callback:
@@ -97,17 +140,44 @@ async def build_jianying_draft(
 
             script.add_segment(video_seg, "main")
 
-            # Add subtitle if text available
-            if seg.text and len(seg.text.strip()) > 0:
+            # 计算最终字幕文本（含 display_text 覆盖 + 说话人标签）
+            subtitle_text = _get_subtitle_text(seg, params)
+            if subtitle_text:
                 try:
-                    script.add_track(draft.TrackType.text, f"subtitle_{i}")
-                    text_seg = draft.TextSegment(
-                        seg.text.strip(),
-                        target_timerange=draft.Timerange(timeline_cursor, duration_us),
-                    )
-                    script.add_segment(text_seg, f"subtitle_{i}")
-                except:
-                    pass  # Subtitle is optional
+                    # 超长字幕分行：检查 subtitle_line_break，生成两张字幕卡
+                    line_break_time = _find_line_break_time(seg)
+                    if line_break_time is not None and seg.start < line_break_time < seg.end:
+                        # 第一张字幕卡：seg.start → line_break_time
+                        lb_offset_us = int((line_break_time - seg.start) * 1_000_000)
+                        remaining_us = duration_us - lb_offset_us
+                        # 切分字幕文本（按 words 分割）
+                        text_part1, text_part2 = _split_text_at_break(seg, line_break_time)
+                        script.add_track(draft.TrackType.text, f"subtitle_{i}_a")
+                        script.add_segment(
+                            draft.TextSegment(
+                                text_part1 or subtitle_text,
+                                target_timerange=draft.Timerange(timeline_cursor, lb_offset_us),
+                            ),
+                            f"subtitle_{i}_a"
+                        )
+                        # 第二张字幕卡：line_break_time → seg.end
+                        script.add_track(draft.TrackType.text, f"subtitle_{i}_b")
+                        script.add_segment(
+                            draft.TextSegment(
+                                text_part2 or "",
+                                target_timerange=draft.Timerange(timeline_cursor + lb_offset_us, remaining_us),
+                            ),
+                            f"subtitle_{i}_b"
+                        )
+                    else:
+                        script.add_track(draft.TrackType.text, f"subtitle_{i}")
+                        text_seg = draft.TextSegment(
+                            subtitle_text,
+                            target_timerange=draft.Timerange(timeline_cursor, duration_us),
+                        )
+                        script.add_segment(text_seg, f"subtitle_{i}")
+                except Exception:
+                    pass  # 字幕是可选的，失败不阻断导出
 
             # Advance timeline cursor
             timeline_cursor += duration_us
@@ -128,18 +198,42 @@ async def build_jianying_draft(
     except ImportError:
         if log_callback:
             await log_callback("warn", "jianying", "pyJianYingDraft 未安装，生成 JSON 草稿文件")
-        return await _build_json_draft(video_path, kept_segments, draft_name, log_callback)
+        return await _build_json_draft(video_path, kept_segments, draft_name, log_callback, params)
     except Exception as e:
         if log_callback:
             await log_callback("error", "jianying", f"剪映草稿生成失败: {str(e)}")
-        return await _build_json_draft(video_path, kept_segments, draft_name, log_callback)
+        return await _build_json_draft(video_path, kept_segments, draft_name, log_callback, params)
+
+
+def _split_text_at_break(seg: Segment, line_break_time: float):
+    """
+    按分行时间把 seg.text 拆成两部分字符串。
+    以 words 中时间 < line_break_time 的字符归第一张卡，其余归第二张卡。
+    """
+    if not seg.words:
+        # 无 words 信息：按时间比例估算字符切点
+        ratio = (line_break_time - seg.start) / max(seg.end - seg.start, 0.001)
+        text = seg.text or ""
+        cut = max(1, int(len(text) * ratio))
+        return text[:cut], text[cut:]
+    part1_chars, part2_chars = [], []
+    for w in seg.words:
+        raw = _re.sub(r'<[^>]*>', '', w.word).strip()
+        if not raw:
+            continue
+        if w.start < line_break_time:
+            part1_chars.append(raw)
+        else:
+            part2_chars.append(raw)
+    return "".join(part1_chars), "".join(part2_chars)
 
 
 async def _build_json_draft(
     video_path: str,
     kept_segments: List[Segment],
     draft_name: str,
-    log_callback: Optional[Callable] = None
+    log_callback: Optional[Callable] = None,
+    params: Optional[TaskParams] = None,
 ) -> Optional[str]:
     """
     Fallback: Build a JSON draft file compatible with pyJianYingDraft format.
@@ -158,6 +252,13 @@ async def _build_json_draft(
         duration_sec = seg.end - seg.start
         duration_us = int(duration_sec * 1_000_000)
 
+        final_text = _get_subtitle_text(seg, params)
+        line_break_time = _find_line_break_time(seg)
+        line_break_texts = None
+        if line_break_time is not None and seg.start < line_break_time < seg.end:
+            t1, t2 = _split_text_at_break(seg, line_break_time)
+            line_break_texts = {"part1": t1, "part2": t2, "break_at_sec": round(line_break_time, 3)}
+
         timeline_segments.append({
             "index": i,
             "source_start": seg.start,
@@ -165,10 +266,16 @@ async def _build_json_draft(
             "source_duration": duration_sec,
             "target_start_us": timeline_cursor,
             "target_duration_us": duration_us,
-            "text": seg.text,
+            "text": final_text,
+            "original_text": seg.text,
+            "display_text": seg.display_text,
+            "fix_type": seg.fix_type,
+            "subtitle_fixed": bool(seg.display_text),
+            "subtitle_line_break": line_break_texts,
             "speaker": seg.speaker,
             "reason": seg.reason,
             "rule": seg.rule.value if seg.rule else None,
+            "action": seg.action.value if seg.action else None,
         })
 
         timeline_cursor += duration_us
