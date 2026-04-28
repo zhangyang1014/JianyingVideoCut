@@ -2,7 +2,9 @@
 # GoldenClip Backend Startup Script
 # OpenRouter API Key for Claude access
 
-export OPENROUTER_API_KEY="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"
+# 请在 local.env 文件中配置你的 API Key（不要写在这里）：
+# echo 'export OPENROUTER_API_KEY="sk-or-xxx"' > local.env
+export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 export CLAUDE_MODEL="anthropic/claude-3.5-sonnet"
 
 # FunASR / ModelScope 模型缓存目录，固定指向项目内 models/，避免重复下载

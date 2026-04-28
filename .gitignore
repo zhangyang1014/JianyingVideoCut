@@ -49,3 +49,4 @@ models/
 *.docx
 make_prd*.py
 generate_prd*.py
+local.env
