@@ -48,8 +48,10 @@ import {
   uploadVideo,
   deleteTask,
   getThumbnailUrl,
+  listThemes,
   type Task,
   type TaskStatus,
+  type ThemeMeta,
   STATUS_LABELS,
   STATUS_COLORS,
   TASK_TYPE_LABELS,
@@ -88,16 +90,16 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete: (id: string) => vo
 
   return (
     <div
-      className="group relative bg-card border border-border rounded-xl overflow-hidden hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30 transition-all duration-200 cursor-pointer animate-fade-in-up"
+      className="group relative w-[320px] shrink-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30 transition-all duration-200 cursor-pointer animate-fade-in-up"
       onClick={() => navigate(`/tasks/${task.id}`)}
     >
       {/* Thumbnail */}
-      <div className="relative h-36 bg-secondary overflow-hidden">
+      <div className="relative aspect-[4/3] bg-black overflow-hidden">
         {!thumbError && task.video_path ? (
           <img
             src={getThumbnailUrl(task.id)}
             alt={task.name}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain"
             onError={() => setThumbError(true)}
           />
         ) : (
@@ -113,34 +115,36 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete: (id: string) => vo
           </div>
         )}
 
-        {/* Status overlay for running */}
+        {/* Lightweight running indicator to keep the thumbnail visible */}
         {(task.status === "asr_running" || task.status === "audit_running" || task.status === "export_running") && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
+            <div className="h-full w-full bg-primary animate-pulse" />
           </div>
         )}
       </div>
 
       {/* Content */}
-      <div className="p-3">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="text-sm font-medium text-foreground truncate flex-1">{task.name}</h3>
+      <div className="p-3 flex flex-col flex-1">
+        {/* 标题 + 状态 */}
+        <div className="flex items-start justify-between gap-2 mb-1.5">
+          <h3 className="text-sm font-medium text-foreground line-clamp-2 flex-1 leading-snug">{task.name}</h3>
           <StatusBadge status={task.status} />
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
-          <span className="flex items-center gap-1">
+        {/* 类型 tag + 文件名 */}
+        <div className="flex items-center gap-1.5 flex-wrap mb-1">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-muted text-muted-foreground border border-border/50">
             <Video className="w-3 h-3" />
             {TASK_TYPE_LABELS[task.task_type] || task.task_type}
           </span>
-          {task.video_filename && (
-            <span className="truncate max-w-[100px]">{task.video_filename}</span>
-          )}
         </div>
+        {task.video_filename && (
+          <p className="text-xs text-muted-foreground line-clamp-2 leading-snug">{task.video_filename}</p>
+        )}
 
         {/* Stats row */}
         {(task.segments_kept > 0 || task.segments_deleted > 0) && (
-          <div className="flex items-center gap-3 text-xs mt-1">
+          <div className="flex items-center gap-3 text-xs mt-1.5">
             <span className="text-green-400">✓ {task.segments_kept} 保留</span>
             <span className="text-red-400">✗ {task.segments_deleted} 删除</span>
             {compressionRatio !== null && compressionRatio > 0 && (
@@ -149,9 +153,9 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete: (id: string) => vo
           </div>
         )}
 
-        {/* Created time */}
-        <div className="flex items-center justify-between mt-2">
-          <span className="text-xs text-muted-foreground/60">
+        {/* Created time — 贴底 */}
+        <div className="flex items-center justify-between mt-auto pt-2">
+          <span className="text-xs text-muted-foreground">
             {new Date(task.created_at).toLocaleDateString("zh-CN", {
               month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
             })}
@@ -160,7 +164,7 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete: (id: string) => vo
             <Button
               variant="ghost"
               size="icon"
-              className="w-6 h-6 text-muted-foreground hover:text-destructive"
+              className="w-6 h-6 text-foreground/80 hover:text-destructive"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(task.id);
@@ -171,7 +175,7 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete: (id: string) => vo
             <Button
               variant="ghost"
               size="icon"
-              className="w-6 h-6 text-muted-foreground hover:text-primary"
+              className="w-6 h-6 text-foreground/80 hover:text-primary"
             >
               <ArrowRight className="w-3 h-3" />
             </Button>
@@ -201,11 +205,17 @@ function NewTaskDialog({
 }) {
   const [name, setName] = useState("");
   const [taskType, setTaskType] = useState("monologue_clean");
+  const [themeId, setThemeId] = useState<string | null>(null);
+  const [themes, setThemes] = useState<ThemeMeta[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    listThemes().then(setThemes).catch(() => {});
+  }, []);
 
   // Scenario definitions with rules preview
   const SCENARIOS = [
@@ -252,8 +262,8 @@ function NewTaskDialog({
       icon: <Flame className="w-4 h-4" />,
       label: "精彩集锦",
       tag: "Highlight Reel",
-      desc: "抖音/B站/YouTube Shorts 爆款剪辑",
-      target: "保留 10-25%，1-3分钟高能输出",
+      desc: "长视频精选多个爆款片段",
+      target: "",
       color: "text-orange-400",
       border: "border-orange-500/40",
       bg: "bg-orange-500/5",
@@ -288,7 +298,7 @@ function NewTaskDialog({
 
     setUploading(true);
     try {
-      const task = await createTask({ name: name.trim(), task_type: taskType });
+      const task = await createTask({ name: name.trim(), task_type: taskType, theme_id: themeId });
       await uploadVideo(task.id, file, (p) => setUploadProgress(p));
       toast.success("任务创建成功");
       onCreated(task);
@@ -362,9 +372,11 @@ function NewTaskDialog({
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">{activeScenario.desc}</p>
                   </div>
-                  <span className="text-xs text-muted-foreground/60 text-right leading-tight">
-                    {activeScenario.target}
-                  </span>
+                  {activeScenario.target && (
+                    <span className="text-xs text-muted-foreground/60 text-right leading-tight">
+                      {activeScenario.target}
+                    </span>
+                  )}
                 </div>
 
                 {/* Rules Preview */}
@@ -387,16 +399,48 @@ function NewTaskDialog({
                   </div>
                 </div>
 
-                {/* Style Note */}
-                <div className="border-t border-border/30 pt-2">
-                  <p className="text-xs text-muted-foreground/50 leading-relaxed">
-                    <span className="text-muted-foreground/70">气口策略：</span>
-                    {activeScenario.styleNote}
-                  </p>
-                </div>
+                {activeScenario.id !== "highlight_reel" && (
+                  <div className="border-t border-border/30 pt-2">
+                    <p className="text-xs text-muted-foreground/50 leading-relaxed">
+                      <span className="text-muted-foreground/70">气口策略：</span>
+                      {activeScenario.styleNote}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
+
+          {/* Theme Selector — 仅 highlight_reel */}
+          {taskType === "highlight_reel" && themes.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wider">视频主题</Label>
+                <span className="text-[10px] text-muted-foreground/40">选择后会额外发一段主题规则给 AI · 可在 Prompt 管理页修改</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {themes.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setThemeId(themeId === t.id ? null : t.id)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-full border text-xs transition-all",
+                      themeId === t.id
+                        ? "border-orange-500/60 bg-orange-500/15 text-orange-400"
+                        : "border-border/40 bg-secondary/20 text-muted-foreground hover:border-border hover:text-foreground"
+                    )}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+              {themeId && (
+                <p className="text-[10px] text-muted-foreground/50 pl-0.5">
+                  {themes.find(t => t.id === themeId)?.desc}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* File Drop Zone */}
           <div className="space-y-1.5">
@@ -592,7 +636,7 @@ export default function Dashboard() {
         ) : tasks.length === 0 ? (
           <EmptyState onNew={() => setShowNewTask(true)} />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="flex flex-wrap gap-4">
             {tasks.map((task) => (
               <TaskCard key={task.id} task={task} onDelete={handleDelete} />
             ))}

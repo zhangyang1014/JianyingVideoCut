@@ -1,17 +1,19 @@
 /**
  * GoldenClip App Router
  * Design: 暗金剪辑台 · 编导美学
- * Routes: / (Dashboard) | /tasks/:id (Review Workbench) | /config (Settings)
+ * Routes: / (Dashboard) | /tasks/:id (Review Workbench) | /config/api (API 配置) | /config/prompts (Prompt 管理)
  */
 
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import ReviewWorkbench from "./pages/ReviewWorkbench";
 import ConfigPage from "./pages/ConfigPage";
+import ApiConfigPage from "./pages/ApiConfigPage";
+import LearningPage from "./pages/LearningPage";
 import NotFound from "./pages/NotFound";
 import AppLayout from "./components/AppLayout";
 
@@ -21,7 +23,13 @@ function Router() {
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/tasks/:id" component={ReviewWorkbench} />
-        <Route path="/config" component={ConfigPage} />
+        <Route path="/learning" component={LearningPage} />
+        <Route path="/config/api" component={ApiConfigPage} />
+        <Route path="/config/prompts" component={ConfigPage} />
+        {/* /config 重定向到 API 配置页 */}
+        <Route path="/config">
+          <Redirect to="/config/api" />
+        </Route>
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

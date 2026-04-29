@@ -1,0 +1,20 @@
+# GoldenClip 专业术语词典
+# 每行一个词，ASR 识别后自动替换为标准写法
+# 支持：大小写不敏感匹配，词间空格匹配
+
+Claude Code
+Claude
+GitHub
+MCP
+API
+APP
+剪映
+剪映草稿
+FFmpeg
+Whisper
+FunASR
+OpenRouter
+Anthropic
+Paraformer
+Vlog
+口播
