@@ -1,0 +1,89 @@
+{
+  "$schema": "agent.validation_contract",
+  "contract_id": "goldenclip.audit_segments@1",
+  "mission_id": null,
+  "milestone_id": null,
+  "target": "audit.segments 的决策数组（goldenclip.audit_decisions@1）",
+  "assertions": [
+    {
+      "assertion_id": "AS-01",
+      "kind": "code",
+      "description": "输出是合法 JSON 数组，每项含 idx 和合法 action",
+      "check": {
+        "type": "json_schema",
+        "params": {
+          "items_required": ["idx", "action"],
+          "action_enum": ["keep", "delete", "subtitle_fix", "text_fix", "split", "merge_next"]
+        }
+      },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AS-02",
+      "kind": "code",
+      "description": "决策数量与输入片段数量一致，idx 无缺失、无重复、无越界",
+      "check": { "type": "custom_fn", "params": { "fn": "check_decision_coverage" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AS-03",
+      "kind": "code",
+      "description": "不可变字段未被改写：输出不包含 id/start/end/text/words 的新值",
+      "check": { "type": "immutable_fields", "params": { "fields": ["id", "start", "end", "text", "words"] } },
+      "severity": "blocker",
+      "on_fail": "reject"
+    },
+    {
+      "assertion_id": "AS-04",
+      "kind": "code",
+      "description": "条件必填字段完整：delete 必有 reason+rule；subtitle_fix/text_fix 必有 display_text+fix_type；split 必有 split_before 且逐字存在于原文",
+      "check": { "type": "custom_fn", "params": { "fn": "check_conditional_fields" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AS-05",
+      "kind": "code",
+      "description": "rule 取值在 AuditRule 枚举内（Rule 1–Rule 8）",
+      "check": { "type": "custom_fn", "params": { "fn": "check_rule_enum" } },
+      "severity": "major",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AS-06",
+      "kind": "code",
+      "description": "delete 时长占比 ≤ 50%，超过则标记人工复核（profile.human_review_rules）",
+      "check": { "type": "range", "params": { "metric": "delete_duration_ratio", "max": 0.5 } },
+      "severity": "major",
+      "on_fail": "flag_for_human"
+    },
+    {
+      "assertion_id": "AS-07",
+      "kind": "model",
+      "description": "delete 决策的 reason 与所引用规则语义相符（抽查删除密集区）",
+      "check": null,
+      "severity": "major",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AS-08",
+      "kind": "model",
+      "description": "subtitle_fix/text_fix 的 display_text 未引入原文不存在的新内容，未改写句意",
+      "check": null,
+      "severity": "major",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AS-09",
+      "kind": "model",
+      "description": "无明显误删内容主干或连片口误漏删",
+      "check": null,
+      "severity": "minor",
+      "on_fail": "flag_for_human"
+    }
+  ],
+  "required_validators": ["validate.output"],
+  "pass_rule": "all_blockers_and_majors_pass"
+}

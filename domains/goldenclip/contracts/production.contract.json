@@ -1,0 +1,20 @@
+{
+  "contract_id": "goldenclip.production@1",
+  "model": "backend.models.production.ProductionProject",
+  "assertions": [
+    { "id": "PROD-01", "description": "必需镜头有实际视频，源区间在有效范围内", "check": "production_timeline.shot_issues" },
+    { "id": "PROD-02", "description": "每个镜头仅有一路对白；旁白长于画面时拒绝", "check": "production_timeline.shot_issues" },
+    { "id": "PROD-03", "description": "字幕来自最终使用音频的实际 cue", "check": "production_timeline.compile_timeline" },
+    { "id": "PROD-04", "description": "修改文案、声音或选段后旧检查签名失效", "check": "production_timeline.signature" },
+    { "id": "PROD-05", "description": "重复点击复用请求；重试增加 attempt；渲染中修改不覆盖新版本", "check": "test_productions.ProductionAsyncTests" },
+    { "id": "PROD-06", "description": "MP4 含音视频，画幅、时长与完整解码通过", "check": "production_renderer.render_production" },
+    { "id": "PROD-07", "description": "剪映实际打开属于外部验收，未观察到时保持 false", "check": "ProductionRenderJob.checks.jianying_open_verified" },
+    { "id": "PROD-08", "description": "数字人口播有实质改动时保存待应用稿，生成分镜逐字覆盖原稿，经用户确认后更新当前分镜。已有素材留在素材库。", "check": "backend.test_productions" },
+    { "id": "PROD-09", "description": "数字人口播方向保存实际使用的创作者卡版本、内容、证据状态与校验值；注册版本不合法则调用模型前失败，未注册创作者不继承 Lina。", "check": "backend.test_creator_styles / backend.test_productions" },
+    { "id": "PROD-10", "description": "新数字人项目必须选择可用档案，保存本次受众、风格和素材绑定副本。临时覆盖不写回长期档案，后续档案变更不影响已有项目。生成方向记录实际使用的档案副本。", "check": "backend.test_production_presenters" },
+    { "id": "PROD-11", "description": "数字人档案支持新增、按版本更新与停用；旧版本覆盖被拒绝，停用不破坏已有视频。各数字人的形象与声音独立，不沿用其他人的绑定，不在档案中保存凭据。", "check": "backend.test_production_presenters" },
+    { "id": "PROD-12", "description": "页面标题与执行阶段共用技能路由。数字人口播 AI 先按结构技能起稿，再按文字技能独立润色；通用数字人不继承 Lina 专属规则，润色保持方向、镜头编号、段序及结构。技能缺失时在首次模型调用前失败。", "check": "backend.test_production_presenters / backend.test_productions" },
+    { "id": "PROD-13", "description": "规则查看入口返回完整 Skill 原文与实际叠加的规则资料，不截断正文或参考资料；实际固定系统规则与写稿入口共用组装逻辑。项目风格卡来自固定快照，通用数字人不展示 Lina 专属资料，查看和复制不修改档案。", "check": "backend.test_production_presenters / client/src/components/production/WritingRuleViewer.test.tsx" },
+    { "id": "PROD-14", "description": "明确口播目标的 AI 初稿按目标选择示例，段落覆盖顺序一致的口播镜头和事实引用。润色核对规格与权益，方向保存待核对意见及两阶段规则校验值。人工保存的口播稿按原文转分镜。", "check": "backend.test_production_authoring / backend.test_productions" }
+  ]
+}

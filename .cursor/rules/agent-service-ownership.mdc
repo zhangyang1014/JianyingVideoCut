@@ -1,0 +1,13 @@
+---
+description: GoldenClip local service operations ownership
+alwaysApply: true
+---
+
+# Local Service Operations
+
+- When debugging or verifying GoldenClip behavior requires restarting local frontend or backend services, the agent should perform the restart directly instead of asking the user to do it.
+- Before starting duplicate long-running services, inspect existing terminal/process state and reuse, restart, or stop the relevant service as appropriate.
+- Prefer the project's known commands for local services:
+  - Backend: `PYTHONPATH=. python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload`
+  - Frontend: `pnpm dev`
+- If services are managed by the GoldenClip launch agents, the agent may restart those launch agents directly.

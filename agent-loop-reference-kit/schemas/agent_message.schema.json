@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent_message.schema.json",
+  "title": "AgentMessage",
+  "type": "object",
+  "required": ["message_id", "mission_id", "pattern", "from_agent"],
+  "properties": {
+    "message_id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "task_id": { "type": ["string", "null"] },
+    "pattern": {
+      "type": "string",
+      "enum": ["delegation", "creator_verifier", "direct_communication", "negotiation", "broadcast", "handoff"]
+    },
+    "message_type": { "type": "string" },
+    "from_agent": { "type": "string" },
+    "to_agent": { "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+    "priority": { "type": "string", "enum": ["low", "normal", "high", "critical"] },
+    "objective": { "type": "string" },
+    "context": { "type": "object" },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "expected_output_schema": { "type": "string" },
+    "requires_response": { "type": "boolean", "default": true },
+    "deadline_seconds": { "type": "integer", "default": 300 },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

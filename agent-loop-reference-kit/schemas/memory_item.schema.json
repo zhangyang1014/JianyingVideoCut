@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "memory_item.schema.json",
+  "title": "MemoryItem",
+  "type": "object",
+  "required": ["memory_id", "scope", "key", "value", "source"],
+  "properties": {
+    "memory_id": { "type": "string" },
+    "scope": {
+      "type": "string",
+      "enum": ["working", "short_term", "long_term", "global", "user", "project"]
+    },
+    "key": { "type": "string" },
+    "value": { "type": "object" },
+    "entity_type": { "type": "string" },
+    "entity_id": { "type": "string" },
+    "memory_type": { "type": "string" },
+    "content": { "type": "string" },
+    "source": { "type": "string", "enum": ["agent", "user", "tool", "system", "human"] },
+    "source_id": { "type": "string" },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "sensitivity": { "type": "string", "enum": ["public", "internal", "confidential", "sensitive"] },
+    "status": { "type": "string", "enum": ["pending", "confirmed", "rejected", "expired"] },
+    "ttl": { "type": ["string", "null"] },
+    "permission_scope": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

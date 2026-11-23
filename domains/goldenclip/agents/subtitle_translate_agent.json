@@ -1,0 +1,25 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "subtitle_translate_agent",
+  "version": "1.0.0",
+  "agent_type": "execution",
+  "capabilities": ["translate.cues"],
+  "input_schema": "goldenclip.cue_batch_input@1",
+  "output_schema": "goldenclip.cue_translations@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#6-creator-agent",
+    "domain_overlay": "domains/goldenclip/overlays/subtitle_translate.md"
+  },
+  "allowed_tools": [],
+  "model_profile": {
+    "preferred": "subtitle_llm",
+    "fallback": ["mock"],
+    "temperature": 0.2,
+    "comment": "subtitle_llm 解析为 OneClickTranslateConfig.subtitle_model（ollama/openrouter/anthropic）；mock 对应现有 _mock_translate 测试路径"
+  },
+  "risk_class": "produce_internal",
+  "independence_requirements": [],
+  "overrides": { "timeout_seconds": 300, "max_retries": 2 },
+  "enabled": true
+}

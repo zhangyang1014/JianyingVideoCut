@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "route_policy.schema.json",
+  "title": "RoutePolicy",
+  "type": "object",
+  "properties": {
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from_agent", "to_agent", "allowed_patterns"],
+        "properties": {
+          "from_agent": { "type": "string" },
+          "to_agent": { "type": "string" },
+          "allowed_patterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "requires_logging": { "type": "boolean", "default": true },
+          "requires_ack": { "type": "boolean", "default": false }
+        }
+      }
+    },
+    "forbidden_routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from_agent": { "type": "string" },
+          "to_agent": { "type": "string" },
+          "condition": { "type": "string" }
+        }
+      }
+    }
+  }
+}

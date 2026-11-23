@@ -1,0 +1,40 @@
+{
+  "creator_id": "lina",
+  "version": "v1",
+  "method_version": "creator-style-analysis/v1",
+  "evidence_status": "reported",
+  "source": {
+    "kind": "user_supplied_summary",
+    "received_on": "2026-11-19",
+    "url": "https://chatgpt.com/library?file_id=libfile_fde3_f-68d314a6ccb48191996c94ba4725b537_d29549aec77c8191880b9132c7dfe967&account_id=personal",
+    "local_review": "链接返回登录页，未取得逐条正文；下列数字按用户原述保存，未重新计算。"
+  },
+  "batch": {
+    "id": "lina-latest-100-reported-2026-11-19",
+    "platform": "xiaohongshu",
+    "account_id": null,
+    "raw_subtitle_files_reported": 474,
+    "selection": "与 Lina 账号匹配后，按小红书笔记创建时间降序选最新 100 条",
+    "time_field": "platform_created_at",
+    "time_range": null,
+    "selected_works_reported": 100,
+    "independent_recordings": null,
+    "paragraph_locators_reviewed_reported": 596,
+    "works_imported_locally": 0,
+    "paragraph_locators_verified_locally": 0,
+    "evidence_types_reported": ["transcript"],
+    "holdout": null
+  },
+  "metrics": [
+    {"id": "first_paragraph_direct_question", "numerator_reported": 8, "denominator_reported": 100, "unit": "work", "unknown_count": null},
+    {"id": "opening_explicit_main_question", "numerator_reported": 45, "denominator_reported": 100, "unit": "work", "unknown_count": null},
+    {"id": "first_substantive_answer_paragraph_2_or_3", "numerator_reported": 81, "denominator_reported": 100, "unit": "work", "unknown_count": null}
+  ],
+  "rules": [
+    {"id": "LINA-01", "status": "reported", "metric_ids": ["opening_explicit_main_question", "first_substantive_answer_paragraph_2_or_3", "first_paragraph_direct_question"], "support_count": null, "eligible_count": null, "independent_recordings": null, "support": [], "exceptions": [], "exceptions_status": "unknown", "evidence_types": ["transcript"], "note": "综合写稿建议；三个指标不是同一规则符合数，交集未知。"},
+    {"id": "LINA-02", "status": "candidate", "metric_ids": [], "support_count": null, "eligible_count": null, "independent_recordings": null, "support": [], "exceptions": [], "exceptions_status": "unknown", "evidence_types": ["transcript"], "note": "用户提供的学习规划写稿示例，未提供题材支持数或逐条定位。"},
+    {"id": "LINA-03", "status": "candidate", "metric_ids": [], "support_count": null, "eligible_count": null, "independent_recordings": null, "support": [], "exceptions": [], "exceptions_status": "unknown", "evidence_types": ["transcript"], "note": "用户提供的亲子冲突写稿示例，未提供题材支持数或逐条定位。"}
+  ],
+  "works": [],
+  "missing": ["平台账号标识与选样截止时间", "100 条作品 ID、原始时间与完整转写版本", "去重和同源录制分组", "多人说话人归属", "596 处段落定位明细", "题材分母、支持作品和例外", "复核日志与独立验证集"]
+}

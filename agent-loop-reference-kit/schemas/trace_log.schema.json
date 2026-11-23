@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "trace_log.schema.json",
+  "title": "TraceLog",
+  "type": "object",
+  "required": ["trace_id", "mission_id", "agent", "step_index", "timestamp", "event_type"],
+  "properties": {
+    "trace_id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "task_id": { "type": ["string", "null"] },
+    "agent": { "type": "string" },
+    "step_index": { "type": "integer" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "event_type": {
+      "type": "string",
+      "enum": ["message", "tool_call", "decision", "validation", "memory_write", "handoff", "error"]
+    },
+    "input_summary": { "type": "string" },
+    "reasoning_summary": { "type": "string" },
+    "action": { "type": "string" },
+    "output_summary": { "type": "string" },
+    "raw_input_ref": { "type": ["string", "null"] },
+    "raw_output_ref": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] },
+    "latency_ms": { "type": "integer", "default": 0 },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "tokens_in": { "type": "integer" },
+        "tokens_out": { "type": "integer" },
+        "estimated_cost": { "type": "number" }
+      }
+    }
+  }
+}

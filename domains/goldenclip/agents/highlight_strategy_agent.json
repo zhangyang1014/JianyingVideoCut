@@ -1,0 +1,24 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "highlight_strategy_agent",
+  "version": "1.1.0",
+  "agent_type": "execution",
+  "capabilities": ["generate.highlight_reels"],
+  "input_schema": "goldenclip.product_groups@1",
+  "output_schema": "goldenclip.highlight_strategy_candidates@2",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1层",
+    "role": "docs/agent-architecture/agents.md#3-worker-agent",
+    "domain_overlay": "domains/goldenclip/overlays/highlight_strategy_generation.md"
+  },
+  "allowed_tools": ["read_task", "read_asr_result", "read_scenario_prompt", "build_highlight_strategies"],
+  "model_profile": {
+    "preferred": "highlight_reel_llm",
+    "fallback": ["deterministic_three_strategy_builder"],
+    "temperature": 0.0
+  },
+  "risk_class": "produce_internal",
+  "independence_requirements": ["detect.product_occurrences"],
+  "overrides": { "timeout_seconds": 300, "max_retries": 1 },
+  "enabled": true
+}

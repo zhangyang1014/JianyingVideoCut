@@ -1,0 +1,25 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "clip_validator",
+  "version": "1.0.0",
+  "agent_type": "validation",
+  "capabilities": ["validate.output"],
+  "input_schema": "agent.validation_request@1",
+  "output_schema": "agent.validation_result@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#7-validator-agent",
+    "domain_overlay": "domains/goldenclip/overlays/validation.md"
+  },
+  "allowed_tools": ["read_task", "read_asr_result"],
+  "model_profile": {
+    "preferred": "validator_llm",
+    "fallback": [],
+    "temperature": 0.0,
+    "comment": "必须解析为与 audit_llm / subtitle_llm 不同的模型或至少不同上下文；contract 中 kind=code 的断言由运行时直接执行，不经过本模型"
+  },
+  "risk_class": "decision",
+  "independence_requirements": ["audit.segments", "extract.golden_quotes", "translate.cues"],
+  "overrides": { "timeout_seconds": 180, "max_retries": 1 },
+  "enabled": true
+}

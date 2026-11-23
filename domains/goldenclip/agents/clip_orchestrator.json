@@ -1,0 +1,38 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "clip_orchestrator",
+  "version": "1.2.0",
+  "agent_type": "orchestration",
+  "capabilities": ["orchestrate.clip_pipeline"],
+  "input_schema": "goldenclip.orchestrator_input@1",
+  "output_schema": "goldenclip.orchestrator_output@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#1-orchestrator-agent",
+    "domain_overlay": "domains/goldenclip/overlays/orchestrator.md"
+  },
+  "allowed_tools": [
+    "read_task",
+    "run_asr",
+    "run_audit_postprocess",
+    "detect_product_occurrences",
+    "build_highlight_strategies",
+    "write_audit_segments",
+    "write_translation_cues",
+    "generate_tts_audio",
+    "compose_dubbed_video",
+    "ffmpeg_export",
+    "jianying_export",
+    "broadcast_task_status"
+  ],
+  "model_profile": {
+    "preferred": "subtitle_llm",
+    "fallback": ["mock"],
+    "temperature": 0.1,
+    "comment": "逻辑模型名由 ApiConfigPage 的配置解析；编排决策本身也可退化为纯代码状态机（MVP 形态，见 README）"
+  },
+  "risk_class": "decision",
+  "independence_requirements": [],
+  "overrides": { "timeout_seconds": 120, "max_retries": 1 },
+  "enabled": true
+}

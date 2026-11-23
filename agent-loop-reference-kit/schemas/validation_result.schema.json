@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "validation_result.schema.json",
+  "title": "ValidationResult",
+  "type": "object",
+  "required": ["validation_id", "contract_id", "mission_id", "status"],
+  "properties": {
+    "validation_id": { "type": "string" },
+    "contract_id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "validator_agent": { "type": "string" },
+    "status": { "type": "string", "enum": ["passed", "failed", "partially_passed"] },
+    "risk_level": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "passed_assertions": { "type": "array", "items": { "type": "string" } },
+    "failed_assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "assertion_id": { "type": "string" },
+          "reason": { "type": "string" },
+          "evidence": { "type": "string" },
+          "required_fix": { "type": "string" }
+        }
+      }
+    },
+    "approved_for_next_step": { "type": "boolean", "default": false },
+    "requires_human_review": { "type": "boolean", "default": false }
+  }
+}

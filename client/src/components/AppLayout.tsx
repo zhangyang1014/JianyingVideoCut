@@ -8,11 +8,13 @@ import { Link, useLocation } from "wouter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   LayoutGrid,
-  Settings,
   Scissors,
   Zap,
   Key,
   GraduationCap,
+  Clapperboard,
+  ExternalLink,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,13 +22,21 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   href: string;
+  external?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { icon: LayoutGrid,    label: "任务看板",   href: "/" },
+  { icon: Clapperboard, label: "视频创作", href: "/productions" },
+  { icon: Users, label: "数字人管理", href: "/presenters" },
+  {
+    icon: ExternalLink,
+    label: "本地制作工作台",
+    href: "http://127.0.0.1:5188/?project=2",
+    external: true,
+  },
   { icon: GraduationCap, label: "学习",       href: "/learning" },
-  { icon: Key,           label: "API 配置",   href: "/config/api" },
-  { icon: Settings,      label: "Prompt 管理", href: "/config/prompts" },
+  { icon: Key,           label: "AI 配置",    href: "/config/api" },
 ];
 
 interface AppLayoutProps {
@@ -51,13 +61,30 @@ export default function AppLayout({ children }: AppLayoutProps) {
         {/* Nav Items */}
         <nav className="flex flex-col items-center gap-1 flex-1">
           {NAV_ITEMS.map((item) => {
-            const isActive = item.href === "/"
+            const isActive = !item.external && (item.href === "/"
               ? location === "/"
-              : location.startsWith(item.href);
+              : location.startsWith(item.href));
             return (
               <Tooltip key={item.href} delayDuration={0}>
                 <TooltipTrigger asChild>
-                  <Link href={item.href}>
+                  {item.external ? (
+                    <a
+                      href={item.href}
+                      aria-label={item.label}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <div
+                        className={cn(
+                          "w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150",
+                          "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                        )}
+                      >
+                        <item.icon className="w-5 h-5" />
+                      </div>
+                    </a>
+                  ) : (
+                  <Link href={item.href} aria-label={item.label}>
                     <div
                       className={cn(
                         "w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150",
@@ -69,9 +96,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
                       <item.icon className="w-5 h-5" />
                     </div>
                   </Link>
+                  )}
                 </TooltipTrigger>
                 <TooltipContent side="right" className="bg-card border-border text-foreground">
-                  {item.label}
+                  {item.external ? `${item.label}（新窗口打开）` : item.label}
                 </TooltipContent>
               </Tooltip>
             );

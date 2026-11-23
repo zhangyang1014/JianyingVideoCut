@@ -1,0 +1,26 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "sentence_group_optimizer_agent",
+  "version": "1.0.0",
+  "agent_type": "execution",
+  "capabilities": ["optimize.sentence_groups"],
+  "input_schema": "goldenclip.audit_segments@1",
+  "output_schema": "goldenclip.audit_coherence@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#3-worker-agent",
+    "domain_overlay": "domains/goldenclip/overlays/sentence_group_optimization.md",
+    "comment": "运行时执行体为 backend/services/audit_coherence.py；在 semantic_audit_agent 后、highlight_reel_validator 前修复句群边界"
+  },
+  "allowed_tools": ["read_task", "read_asr_result", "read_style_memory"],
+  "model_profile": {
+    "preferred": "audit_llm",
+    "fallback": ["local_coherence_heuristic"],
+    "temperature": 0.0,
+    "comment": "模型不可用时使用 audit_coherence.py 的本地保守规则，只做上下文补回和短尾拆分"
+  },
+  "risk_class": "produce_internal",
+  "independence_requirements": [],
+  "overrides": { "timeout_seconds": 180, "max_retries": 1 },
+  "enabled": true
+}

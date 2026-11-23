@@ -1,0 +1,242 @@
+{
+  "schema_version": 5,
+  "claude_api_key": "",
+  "openai_api_key": "",
+  "claude_model": "",
+  "openai_model": "anthropic/claude-sonnet-4.6",
+  "jianying_dir": "",
+  "provider": "openai",
+  "ollama_model": "deepseek-r1:14b",
+  "ollama_base_url": "http://localhost:11434",
+  "feature_llm": {
+    "audit": {
+      "mode": "cloud",
+      "cloud": {
+        "provider_label": "RouterHub",
+        "base_url": "https://api.routerhub.ai/v1",
+        "api_key": "",
+        "model": "z-ai/glm-5.2"
+      },
+      "local": {
+        "base_url": "http://localhost:11434",
+        "model": "qwen2.5:32b"
+      }
+    },
+    "translate": {
+      "mode": "cloud",
+      "cloud": {
+        "provider_label": "RouterHub",
+        "base_url": "https://api.routerhub.ai/v1",
+        "api_key": "",
+        "model": "anthropic/claude-sonnet-4.6"
+      },
+      "local": {
+        "base_url": "http://localhost:11434",
+        "model": "qwen2.5:14b"
+      }
+    },
+    "highlight_reel": {
+      "mode": "cloud",
+      "cloud": {
+        "provider_label": "RouterHub",
+        "base_url": "https://api.routerhub.ai/v1",
+        "api_key": "",
+        "model": "anthropic/claude-opus-4.8"
+      },
+      "local": {
+        "base_url": "http://localhost:11434",
+        "model": "qwen2.5:32b"
+      }
+    },
+    "golden_quote": {
+      "mode": "cloud",
+      "cloud": {
+        "provider_label": "RouterHub",
+        "base_url": "https://api.routerhub.ai/v1",
+        "api_key": "",
+        "model": "z-ai/glm-5.2"
+      },
+      "local": {
+        "base_url": "http://localhost:11434",
+        "model": "qwen2.5:14b"
+      }
+    },
+    "learning": {
+      "mode": "cloud",
+      "cloud": {
+        "provider_label": "RouterHub",
+        "base_url": "https://api.routerhub.ai/v1",
+        "api_key": "",
+        "model": "anthropic/claude-opus-4.8"
+      },
+      "local": {
+        "base_url": "http://localhost:11434",
+        "model": "qwen2.5:32b"
+      }
+    },
+    "tts": {
+      "mode": "cloud",
+      "cloud": {
+        "provider_label": "OpenRouter TTS",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "",
+        "model": "mistralai/voxtral-mini-tts-2603"
+      },
+      "voice": "en_paul_neutral"
+    }
+  },
+  "provider_profiles": [
+    {
+      "id": "routerhub",
+      "label": "RouterHub",
+      "provider": "openai_compatible",
+      "base_url": "https://api.routerhub.ai/v1",
+      "api_key": "",
+      "api_key_env": "ROUTERHUB_API_KEY",
+      "enabled": true
+    },
+    {
+      "id": "volcengine-ark",
+      "label": "火山方舟",
+      "provider": "openai_compatible",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "api_key": "",
+      "api_key_env": "VOLCENGINE_ARK_API_KEY",
+      "enabled": true
+    },
+    {
+      "id": "zhipu",
+      "label": "智谱开放平台",
+      "provider": "openai_compatible",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "",
+      "api_key_env": "ZHIPU_API_KEY",
+      "enabled": true
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "provider": "openai_compatible",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "enabled": true
+    },
+    {
+      "id": "ollama-local",
+      "label": "本地 Ollama",
+      "provider": "ollama",
+      "base_url": "http://localhost:11434",
+      "api_key": "",
+      "api_key_env": "",
+      "enabled": true
+    }
+  ],
+  "llm_role_routes": {
+    "audit.semantic": {
+      "label": "语义审计",
+      "purpose": "复杂语义、多约束片段判定",
+      "quality_gate_escalation": true,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "z-ai/glm-5.2", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-opus-4.8", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}}
+      ]
+    },
+    "audit.coherence": {
+      "label": "连贯性复核",
+      "purpose": "独立检查上下文与修复建议",
+      "quality_gate_escalation": true,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-opus-4.8", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "google/gemini-3.1-pro-preview", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}}
+      ]
+    },
+    "translate.subtitle": {
+      "label": "字幕翻译",
+      "purpose": "高频字幕校准与翻译",
+      "quality_gate_escalation": false,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-sonnet-4.6", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {}},
+        {"provider_profile_id": "routerhub", "model": "google/gemini-3.1-pro-preview", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {}}
+      ]
+    },
+    "golden_quote.extract": {
+      "label": "金句提取",
+      "purpose": "中文表达判断与钩子候选抽取",
+      "quality_gate_escalation": false,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "z-ai/glm-5.2", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}},
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-sonnet-4.6", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}},
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}}
+      ]
+    },
+    "highlight.strategy": {
+      "label": "集锦策略生成",
+      "purpose": "复杂片段选择与叙事编排",
+      "quality_gate_escalation": true,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-opus-4.8", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "google/gemini-3.1-pro-preview", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}}
+      ]
+    },
+    "highlight.validation": {
+      "label": "集锦独立质检",
+      "purpose": "跨模型验收事实与结构完整性",
+      "quality_gate_escalation": true,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "google/gemini-3.1-pro-preview", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-opus-4.8", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}}
+      ]
+    },
+    "learning.analyze": {
+      "label": "学习分析",
+      "purpose": "长上下文证据归因与规则提炼",
+      "quality_gate_escalation": true,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-opus-4.8", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}},
+        {"provider_profile_id": "routerhub", "model": "google/gemini-3.1-pro-preview", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "high"}}}
+      ]
+    },
+    "learning.rewrite": {
+      "label": "Prompt 改写",
+      "purpose": "自然中文与规则块重写",
+      "quality_gate_escalation": false,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "z-ai/glm-5.2", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}},
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-sonnet-4.6", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}},
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}}
+      ]
+    },
+    "prompt_feedback.optimize": {
+      "label": "反馈优化",
+      "purpose": "根据人工修正优化中文 Prompt",
+      "quality_gate_escalation": false,
+      "candidates": [
+        {"provider_profile_id": "routerhub", "model": "z-ai/glm-5.2", "tier": "primary", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}},
+        {"provider_profile_id": "routerhub", "model": "anthropic/claude-sonnet-4.6", "tier": "fallback", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}},
+        {"provider_profile_id": "routerhub", "model": "openai/gpt-5.6-sol", "tier": "escalation", "enabled": true, "thinking": "auto", "extra_body": {"reasoning": {"effort": "medium"}}}
+      ]
+    }
+  },
+  "asr": {
+    "funasr_chunk_minutes": 5,
+    "funasr_parallel_chunks": 4
+  },
+  "audit_runtime": {
+    "cloud_chunk_segments": 120,
+    "cloud_max_parallel_chunks": 8,
+    "cloud_initial_parallel_chunks": 8,
+    "cloud_chunk_token_budget": 24000,
+    "enable_batch_resume": true,
+    "enable_incremental_cache": true,
+    "coherence_strategy": "auto"
+  },
+  "highlight_runtime": {
+    "cloud_max_parallel_calls": 3
+  }
+}

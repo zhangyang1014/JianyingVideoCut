@@ -1,6 +1,5 @@
 /**
- * ModelPickerPopover — 快速模型选择器
- * 在审计/分析按钮旁显示当前模型名，点击弹出 Popover 可切换 Provider 和模型
+ * ModelPickerPopover — 按功能快速切换模型
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -9,30 +8,46 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import {
   type AppConfig,
-  type LLMProvider,
-  CLAUDE_MODELS,
-  LLM_PROVIDERS,
+  type FeatureKey,
+  CLOUD_MODEL_SUGGESTIONS,
+  MODEL_GROUP_LABELS,
   getModelShortLabel,
+  patchFeatureLlm,
+  patchRolePrimaryModel,
 } from "@/hooks/useAppConfig";
 
 interface ModelPickerPopoverProps {
   config: AppConfig;
-  updateConfig: (patch: Partial<AppConfig>) => void;
+  updateConfig: (patch: Partial<AppConfig>) => void | Promise<void>;
   disabled?: boolean;
+  /** 当前上下文功能，默认语义审计 */
+  feature?: FeatureKey;
 }
 
-export function ModelPickerPopover({ config, updateConfig, disabled }: ModelPickerPopoverProps) {
+export function ModelPickerPopover({
+  config,
+  updateConfig,
+  disabled,
+  feature = "audit",
+}: ModelPickerPopoverProps) {
   const [open, setOpen] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [ollamaLoading, setOllamaLoading] = useState(false);
 
+  const isTts = feature === "tts";
+  const featConfig = !isTts ? config.featureLlm[feature] : null;
+  const mode = isTts ? config.featureLlm.tts.mode : featConfig!.mode;
+  const cloudModel = isTts ? config.featureLlm.tts.cloud.model : featConfig!.cloud.model;
+  const localModel = featConfig?.local.model ?? "";
+  const localBaseUrl = featConfig?.local.baseUrl ?? "http://localhost:11434";
+
   const fetchOllamaModels = useCallback(async () => {
     setOllamaLoading(true);
     try {
-      const baseUrl = (config.ollamaBaseUrl || "http://localhost:11434").replace(/\/$/, "");
+      const baseUrl = (localBaseUrl || "http://localhost:11434").replace(/\/$/, "");
       const res = await fetch(
-        `http://localhost:8000/api/ollama/models?base_url=${encodeURIComponent(baseUrl)}`,
-        { signal: AbortSignal.timeout(5000) }
+        `/api/ollama/models?base_url=${encodeURIComponent(baseUrl)}`,
+        { signal: AbortSignal.timeout(5000) },
       );
       if (res.ok) {
         const data = await res.json();
@@ -43,15 +58,26 @@ export function ModelPickerPopover({ config, updateConfig, disabled }: ModelPick
     } finally {
       setOllamaLoading(false);
     }
-  }, [config.ollamaBaseUrl]);
+  }, [localBaseUrl]);
 
   useEffect(() => {
-    if (open && config.provider === "ollama") {
+    if (open && !isTts && mode === "local") {
       fetchOllamaModels();
     }
-  }, [open, config.provider, fetchOllamaModels]);
+  }, [open, isTts, mode, fetchOllamaModels]);
 
-  const shortLabel = getModelShortLabel(config);
+  const shortLabel = getModelShortLabel(config, feature);
+  const cloudSuggestions = CLOUD_MODEL_SUGGESTIONS[feature];
+  const modelGroups = (["recommended", "quality", "balanced", "economy", "experimental"] as const)
+    .map((group) => ({
+      group,
+      models: cloudSuggestions.filter((m) => (m.group ?? "balanced") === group),
+    }))
+    .filter((item) => item.models.length > 0);
+
+  const applyPatch = (patch: Parameters<typeof patchFeatureLlm>[2]) => {
+    updateConfig(patchFeatureLlm(config, feature, patch));
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -61,7 +87,7 @@ export function ModelPickerPopover({ config, updateConfig, disabled }: ModelPick
           className={cn(
             "flex items-center gap-1 px-2 py-1 h-7 rounded text-xs border transition-colors",
             "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60",
-            disabled && "opacity-50 cursor-not-allowed"
+            disabled && "opacity-50 cursor-not-allowed",
           )}
           title="快速切换模型"
         >
@@ -70,57 +96,30 @@ export function ModelPickerPopover({ config, updateConfig, disabled }: ModelPick
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0 bg-card border-border">
-        {/* 提供商切换 */}
-        <div className="px-3 py-2 border-b border-border">
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1.5">提供商</p>
-          <div className="flex gap-1">
-            {LLM_PROVIDERS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => updateConfig({ provider: p.value })}
-                className={cn(
-                  "flex-1 px-2 py-1 rounded text-xs transition-colors text-center",
-                  config.provider === p.value
-                    ? "bg-primary/20 text-primary font-medium"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 模型列表 */}
-        <div className="max-h-56 overflow-y-auto">
-          {config.provider === "claude" ? (
-            CLAUDE_MODELS.map((m) => {
-              const selected = config.claudeModel === m.value;
-              return (
+        {!isTts && (
+          <div className="px-3 py-2 border-b border-border">
+            <p className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mb-1.5">路线</p>
+            <div className="flex gap-1">
+              {(["cloud", "local"] as const).map((m) => (
                 <button
-                  key={m.value}
-                  onClick={() => {
-                    updateConfig({ claudeModel: m.value });
-                    setOpen(false);
-                  }}
+                  key={m}
+                  onClick={() => applyPatch({ mode: m })}
                   className={cn(
-                    "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors",
-                    selected ? "bg-primary/10" : "hover:bg-secondary/60"
+                    "flex-1 px-2 py-1 rounded text-xs transition-colors text-center",
+                    mode === m
+                      ? "bg-primary/20 text-primary font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/60",
                   )}
                 >
-                  <div className="w-4 shrink-0 flex justify-center">
-                    {selected && <Check className="w-3 h-3 text-primary" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={cn("text-xs", selected ? "text-primary font-medium" : "text-foreground")}>
-                      {m.shortLabel}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/60 truncate">{m.desc}</p>
-                  </div>
+                  {m === "cloud" ? "云端" : "本地"}
                 </button>
-              );
-            })
-          ) : (
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="max-h-56 overflow-y-auto">
+          {!isTts && mode === "local" ? (
             <>
               {ollamaLoading && (
                 <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
@@ -129,44 +128,79 @@ export function ModelPickerPopover({ config, updateConfig, disabled }: ModelPick
                 </div>
               )}
               {!ollamaLoading && ollamaModels.length === 0 && (
-                <div className="px-3 py-3 text-xs text-muted-foreground/60">
-                  未检测到 Ollama 模型
-                </div>
+                <div className="px-3 py-3 text-xs text-muted-foreground/60">未检测到 Ollama 模型</div>
               )}
               {!ollamaLoading && ollamaModels.map((m) => {
-                const selected = config.ollamaModel === m;
+                const selected = localModel === m;
                 return (
                   <button
                     key={m}
                     onClick={() => {
-                      updateConfig({ ollamaModel: m });
+                      applyPatch({ local: { ...featConfig!.local, model: m } });
                       setOpen(false);
                     }}
                     className={cn(
                       "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors",
-                      selected ? "bg-primary/10" : "hover:bg-secondary/60"
+                      selected ? "bg-primary/10" : "hover:bg-secondary/60",
                     )}
                   >
                     <div className="w-4 shrink-0 flex justify-center">
                       {selected && <Check className="w-3 h-3 text-primary" />}
                     </div>
-                    <p className={cn(
-                      "text-xs font-mono truncate",
-                      selected ? "text-primary font-medium" : "text-foreground"
-                    )}>
+                    <p className={cn("text-xs font-mono truncate", selected ? "text-primary font-medium" : "text-foreground")}>
                       {m}
                     </p>
                   </button>
                 );
               })}
             </>
+          ) : (
+            modelGroups.map(({ group, models }) => (
+              <div key={group} className="py-1">
+                <p className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-wider">
+                  {MODEL_GROUP_LABELS[group]}
+                </p>
+                {models.map((m) => {
+                  const selected = cloudModel === m.value;
+                  return (
+                    <button
+                      key={m.value}
+                      onClick={() => {
+                        if (isTts) {
+                          applyPatch({ cloud: { ...config.featureLlm.tts.cloud, model: m.value } });
+                        } else {
+                          const legacyPatched = patchFeatureLlm(config, feature, {
+                            cloud: { ...featConfig!.cloud, model: m.value },
+                          });
+                          updateConfig(patchRolePrimaryModel(legacyPatched, feature, m.value));
+                        }
+                        setOpen(false);
+                      }}
+                      className={cn(
+                        "w-full text-left px-3 py-2 flex items-center gap-2 transition-colors",
+                        selected ? "bg-primary/10" : "hover:bg-secondary/60",
+                      )}
+                    >
+                      <div className="w-4 shrink-0 flex justify-center">
+                        {selected && <Check className="w-3 h-3 text-primary" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={cn("text-xs", selected ? "text-primary font-medium" : "text-foreground")}>
+                          {m.shortLabel}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground/60 truncate">{m.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
 
-        {/* 底部：跳转完整设置 */}
         <div className="border-t border-border px-3 py-1.5">
           <a
-            href="/config"
+            href="/config/api"
             className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
           >
             <Settings className="w-3 h-3" />

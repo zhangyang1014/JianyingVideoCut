@@ -1,0 +1,51 @@
+{
+  "$schema": "agent.validation_contract",
+  "contract_id": "goldenclip.product_groups@1",
+  "mission_id": null,
+  "milestone_id": null,
+  "target": "产品场次到全局产品组的血缘归并结果",
+  "assertions": [
+    {
+      "assertion_id": "PG-01",
+      "kind": "code",
+      "description": "product_group_id 唯一且稳定",
+      "check": { "type": "custom_fn", "params": { "fn": "check_unique_group_ids" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "PG-02",
+      "kind": "code",
+      "description": "每个 occurrence 必须且只能属于一个产品组，且引用必须存在",
+      "check": { "type": "custom_fn", "params": { "fn": "check_occurrence_partition" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "PG-03",
+      "kind": "code",
+      "description": "产品组 segment_ids 必须等于其 occurrence 的片段并集且全部存在",
+      "check": { "type": "custom_fn", "params": { "fn": "check_segment_lineage" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "PG-04",
+      "kind": "code",
+      "description": "产品组片段按源时间排序，起止边界与首尾片段一致",
+      "check": { "type": "custom_fn", "params": { "fn": "check_group_timeline" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "PG-05",
+      "kind": "code",
+      "description": "产品组必须提供非空 canonical_name 和 aliases，aliases 不应重复",
+      "check": { "type": "custom_fn", "params": { "fn": "check_group_identity" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    }
+  ],
+  "required_validators": ["validate.output"],
+  "pass_rule": "all_blockers_pass"
+}

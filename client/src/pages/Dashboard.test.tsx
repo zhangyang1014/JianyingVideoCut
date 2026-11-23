@@ -46,6 +46,9 @@ function createTask(overrides: Partial<Task> = {}): Task {
     asr_history: [],
     audit_segments: [],
     audit_history: [],
+    content_revision: 0,
+    highlight_revision: 0,
+    export_jobs: [],
     params: {
       silence_threshold: 0.3,
       breath_lead_ms: 80,
@@ -80,5 +83,34 @@ describe("Dashboard", () => {
     });
 
     expect(container.innerHTML).not.toContain("absolute inset-0 bg-black/60");
+  });
+
+  it("renders the execution_run list summary", async () => {
+    mockFetchTasks.mockResolvedValue([
+      createTask({
+        status: "error",
+        execution_run: {
+          run_id: "run-list",
+          generation: 2,
+          operation: "audit",
+          status: "retry_wait",
+          current_stage: "semantic_audit",
+          retry_state: {
+            retries_used: 2,
+            max_retries: 3,
+            next_retry_at: new Date(Date.now() + 20_000).toISOString(),
+          },
+          error: { error_type: "rate_limit", message: "later", retryable: true },
+          recoverable: true,
+          created_at: "2026-07-30T08:00:00.000Z",
+          updated_at: "2026-07-30T08:00:00.000Z",
+        },
+      }),
+    ]);
+
+    render(<Dashboard />);
+
+    expect(await screen.findByText(/自动重试第 2 次（总4次）/)).toBeTruthy();
+    expect(screen.getByText(/当前阶段：semantic_audit/)).toBeTruthy();
   });
 });

@@ -1,0 +1,75 @@
+{
+  "$schema": "agent.validation_contract",
+  "contract_id": "goldenclip.audit_coherence@1",
+  "mission_id": null,
+  "milestone_id": null,
+  "target": "optimize.sentence_groups 的安全修复结果（goldenclip.audit_coherence@1）",
+  "assertions": [
+    {
+      "assertion_id": "AC-01",
+      "kind": "code",
+      "description": "连贯性修复覆盖完整：片段 id 集合与输入一致，无缺失、无新增、无重复",
+      "check": { "type": "custom_fn", "params": { "fn": "check_repair_coverage" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AC-02",
+      "kind": "code",
+      "description": "不可变字段未被改写：id/start/end/text/words 保持输入值",
+      "check": { "type": "immutable_fields", "params": { "fields": ["id", "start", "end", "text", "words"] } },
+      "severity": "blocker",
+      "on_fail": "reject"
+    },
+    {
+      "assertion_id": "AC-03",
+      "kind": "code",
+      "description": "text_fix 必须提供 display_text，且 fix_type 必须为 asr_error",
+      "check": { "type": "custom_fn", "params": { "fn": "check_text_fix_fields" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AC-04",
+      "kind": "code",
+      "description": "split 必须提供 split_before，且 split_before 必须逐字存在于原片段 text 中",
+      "check": { "type": "custom_fn", "params": { "fn": "check_split_before" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AC-05",
+      "kind": "code",
+      "description": "delete 必须提供 reason 和 rule，避免无解释隐藏内容",
+      "check": { "type": "custom_fn", "params": { "fn": "check_delete_fields" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "AC-06",
+      "kind": "code",
+      "description": "连贯性复核新增保留时长占比 <= 25%，超过则标记人工复核",
+      "check": { "type": "range", "params": { "metric": "added_keep_duration_ratio", "max": 0.25 } },
+      "severity": "major",
+      "on_fail": "flag_for_human"
+    },
+    {
+      "assertion_id": "AC-07",
+      "kind": "model",
+      "description": "保留稿无明显半句话开头、半句话结尾或承接词缺上下文",
+      "check": null,
+      "severity": "major",
+      "on_fail": "flag_for_human"
+    },
+    {
+      "assertion_id": "AC-08",
+      "kind": "model",
+      "description": "split/merge_next 后的句群边界符合自然口播节奏，未制造新的语义断裂",
+      "check": null,
+      "severity": "major",
+      "on_fail": "flag_for_human"
+    }
+  ],
+  "required_validators": ["validate.output"],
+  "pass_rule": "all_blockers_pass"
+}

@@ -6,8 +6,9 @@ import asyncio
 import sys
 import os
 
-# Set the key
-os.environ["OPENROUTER_API_KEY"] = "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"
+if not os.environ.get("OPENROUTER_API_KEY"):
+    print("SKIP: set OPENROUTER_API_KEY to run this manual integration test.")
+    raise SystemExit(0)
 
 sys.path.insert(0, "/home/ubuntu/goldenclip")
 

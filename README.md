@@ -1,6 +1,6 @@
 # GoldenClip 智能视频工作站 v3.0
 
-> **编导思维驱动** · ASR + Claude 语义审计 · 分钟级产出高质量精华片段
+> **编导思维驱动** · ASR + 多模型任务角色路由 · 分钟级产出高质量精华片段
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green)](https://fastapi.tiangolo.com)
@@ -11,7 +11,7 @@
 
 ## 🎬 项目愿景
 
-GoldenClip 是一个"**编导思维**"驱动的本地剪辑工具，通过 **ASR + Claude 语义审计** 自动完成访谈与口播的初剪，辅以轻量化网页交互，实现"分钟级"产出高质量精华片段。
+GoldenClip 是一个"**编导思维**"驱动的本地剪辑工具，通过 **ASR + 按任务角色路由的大模型** 自动完成访谈与口播的初剪，辅以轻量化网页交互，实现"分钟级"产出高质量精华片段。
 
 ### 核心用例
 
@@ -35,7 +35,7 @@ GoldenClip 是一个"**编导思维**"驱动的本地剪辑工具，通过 **ASR
 │                                                          │
 │  ┌──────────┐  ┌──────────────┐  ┌──────────────────┐   │
 │  │ 任务管理  │  │ ASR 管道      │  │ SemanticAuditor  │   │
-│  │ JSON存储  │  │ Whisper/VAD  │  │ Claude 3.5/3.6  │   │
+│  │ JSON存储  │  │ Whisper/VAD  │  │ 任务角色 LLM 路由 │   │
 │  └──────────┘  └──────────────┘  └──────────────────┘   │
 │                                                          │
 │  ┌──────────────────┐  ┌──────────────────────────────┐  │
@@ -52,14 +52,12 @@ GoldenClip 是一个"**编导思维**"驱动的本地剪辑工具，通过 **ASR
 ### 1. 环境要求
 
 ```bash
-# 必须
-sudo apt install ffmpeg          # 视频处理
-pip install fastapi uvicorn python-multipart pydantic aiofiles anthropic
+# macOS。其他平台请先安装 FFmpeg 和 Python 3.10+。
+brew install ffmpeg python@3.12
 
-# 可选（更好的 ASR 效果）
-pip install faster-whisper       # 本地高质量 ASR
-pip install pyannote.audio       # 说话人分离 (Diarization)
-pip install pyJianYingDraft      # 剪映草稿生成
+# 在项目根目录使用 Python 3.10+ 创建虚拟环境（以 3.12 为例）
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
 ### 2. 启动后端
@@ -71,8 +69,8 @@ bash start_backend.sh
 # 方式二：开发模式（热重载）
 bash start_backend.sh --dev
 
-# 方式三：手动启动
-PYTHONPATH=. python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+# 方式三：前台启动，直接查看后端日志
+bash scripts/run-backend.sh
 ```
 
 ### 3. 启动前端
@@ -80,18 +78,22 @@ PYTHONPATH=. python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```bash
 pnpm install
 pnpm dev
-# 访问 http://localhost:3000
+# 访问 http://localhost:5177
 ```
 
-### 4. 配置 Claude API Key（可选）
+### 4. 配置模型供应商（可选）
 
-在 Review 工作台的导出面板中输入 API Key，或设置环境变量：
+在「AI 配置 → 角色路由」中配置供应商档案，也可使用环境变量：
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+export ROUTERHUB_API_KEY="..."
+export VOLCENGINE_ARK_API_KEY="..."
+export ZHIPU_API_KEY="..."
+# 默认仅云端 TTS 使用
+export OPENROUTER_API_KEY="..."
 ```
 
-> **无 API Key 时**：系统自动使用内置规则引擎（应用 8 条黄金规则），效果良好但不如 Claude 智能。
+文本模型默认统一通过 RouterHub，并按任务精确分工：中文复杂语义、金句和 Prompt 改写优先 GLM-5.2，集锦策略与学习归因优先 Claude Opus 4.8，字幕翻译优先 Claude Sonnet 4.6，独立复核优先 GPT-5.6 Sol，并用 Gemini 3.1 Pro 做跨模型后备。复杂任务启用 RouterHub 的 medium/high reasoning；OpenRouter 仅保留云端 TTS。没有 RouterHub 凭据时不会静默借用 OpenRouter Key，审计和集锦仍保留确定性规则兜底。
 
 ---
 
@@ -121,7 +123,7 @@ Faster-Whisper → 字符级时间戳
 标记 <FIL> 语气词 / <STU> 结巴
     │
     ▼ 第二步：审计 (Semantic Audit)
-带标签剧本 → Claude 3.5/3.6
+带标签剧本 → `audit.semantic` 角色路由
 应用 8 条黄金规则
 输出 JSON 指令集 [{action, start, end, reason, rule}]
     │
@@ -137,7 +139,7 @@ Faster-Whisper → 字符级时间戳
 ### 任务看板
 - 卡片式展示所有任务（缩略图、状态、统计）
 - 拖拽上传 MP4/MOV/AVI/MKV/WebM
-- 任务类型：口播精修 / 精彩集锦 / 访谈压缩
+- 任务类型：口播精修 / 精彩集锦 / 直播访谈压缩
 
 ### Review 工作台（三栏布局）
 ```
@@ -205,7 +207,7 @@ goldenclip/
 | `DELETE` | `/api/tasks/{id}` | 删除任务 |
 | `POST` | `/api/tasks/{id}/upload` | 上传视频 |
 | `POST` | `/api/tasks/{id}/asr` | 触发 ASR 识别 |
-| `POST` | `/api/tasks/{id}/audit` | 触发 Claude 审计 |
+| `POST` | `/api/tasks/{id}/audit` | 触发任务角色语义审计 |
 | `POST` | `/api/tasks/{id}/segments/{seg_id}/toggle` | 切换片段保留/删除 |
 | `POST` | `/api/tasks/{id}/export/ffmpeg` | FFmpeg 无损导出 |
 | `POST` | `/api/tasks/{id}/export/jianying` | 生成剪映草稿 |
@@ -223,7 +225,7 @@ goldenclip/
 |------|------|
 | 后端 | Python 3.10+, FastAPI, Uvicorn, Pydantic v2 |
 | 前端 | React 19, TypeScript, Tailwind CSS 4, shadcn/ui |
-| AI/ASR | faster-whisper, Silero VAD (模拟), Claude 3.5/3.6 |
+| AI/ASR | FunASR/faster-whisper、OpenAI-compatible 多模型角色路由 |
 | 视频处理 | FFmpeg (无损切割拼接) |
 | 剪映集成 | pyJianYingDraft |
 | 说话人分离 | pyannote.audio (可选) |

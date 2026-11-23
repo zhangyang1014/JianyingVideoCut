@@ -1,0 +1,19 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "production_planner_agent",
+  "version": "1.2.0",
+  "agent_type": "execution",
+  "capabilities": ["plan.selling_video", "inspect.production_asset"],
+  "input_schema": "goldenclip.production_project@1",
+  "output_schema": "goldenclip.production_directions@1",
+  "prompt_layers": {
+    "domain_overlay": "domains/goldenclip/overlays/production_planning.md",
+    "creator_style_registry": "domains/goldenclip/creator_styles/active.json",
+    "presenter_workflow": "domains/goldenclip/presenter_workflow.json"
+  },
+  "allowed_tools": ["production_plan", "production_asset_inspect"],
+  "model_profile": { "preferred": "production.plan", "temperature": 1.0 },
+  "risk_class": "produce_internal",
+  "overrides": { "timeout_seconds": 180, "max_retries": 1 },
+  "enabled": true
+}

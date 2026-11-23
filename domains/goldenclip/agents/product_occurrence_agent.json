@@ -1,0 +1,24 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "product_occurrence_agent",
+  "version": "1.0.0",
+  "agent_type": "execution",
+  "capabilities": ["detect.product_occurrences"],
+  "input_schema": "goldenclip.audit_segments@1",
+  "output_schema": "goldenclip.product_occurrences@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1层",
+    "role": "docs/agent-architecture/agents.md#3-worker-agent",
+    "domain_overlay": "domains/goldenclip/overlays/product_occurrence_detection.md"
+  },
+  "allowed_tools": ["read_task", "read_asr_result", "read_scenario_prompt", "detect_product_occurrences"],
+  "model_profile": {
+    "preferred": "highlight_reel_llm",
+    "fallback": ["deterministic_product_semantic_reducer"],
+    "temperature": 0.0
+  },
+  "risk_class": "produce_internal",
+  "independence_requirements": [],
+  "overrides": { "timeout_seconds": 180, "max_retries": 1 },
+  "enabled": true
+}

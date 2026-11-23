@@ -1,0 +1,24 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "golden_quote_agent",
+  "version": "1.0.0",
+  "agent_type": "execution",
+  "capabilities": ["extract.golden_quotes"],
+  "input_schema": "goldenclip.quote_input@1",
+  "output_schema": "goldenclip.quote_candidates@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#6-creator-agent",
+    "domain_overlay": "domains/goldenclip/overlays/golden_quote.md"
+  },
+  "allowed_tools": ["read_asr_result", "read_style_memory"],
+  "model_profile": {
+    "preferred": "audit_llm",
+    "fallback": [],
+    "temperature": 0.3
+  },
+  "risk_class": "produce_internal",
+  "independence_requirements": [],
+  "overrides": { "timeout_seconds": 180, "max_retries": 1 },
+  "enabled": true
+}

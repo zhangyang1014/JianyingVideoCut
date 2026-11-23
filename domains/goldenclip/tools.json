@@ -1,0 +1,165 @@
+{
+  "$schema": "tool.manifest[]",
+  "comment": "GoldenClip 域工具注册表。backend_impl 指向现有后端实现，Agent 只能经这些工具触达系统，不允许自由读写文件。",
+  "tools": [
+    {
+      "tool_name": "read_task",
+      "version": "1.0.0",
+      "description": "按 task_id 读取任务对象（状态、task_type、params、audit_segments 摘要）",
+      "backend_impl": "backend/services/task_store.py",
+      "params_schema": { "type": "object", "required": ["task_id"], "properties": { "task_id": { "type": "string" } } },
+      "risk_level": "read_only",
+      "allowed_agent_types": ["orchestration", "execution", "validation"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "read_asr_result",
+      "version": "1.0.0",
+      "description": "读取任务的 ASR 结果：segments（含字级 words 时间戳）、tagged_script、句子组",
+      "backend_impl": "backend/services/asr_pipeline.py",
+      "params_schema": { "type": "object", "required": ["task_id"], "properties": { "task_id": { "type": "string" }, "video_id": { "type": ["string", "null"] } } },
+      "risk_level": "read_only",
+      "allowed_agent_types": ["orchestration", "execution", "validation"],
+      "marks_output_untrusted": true,
+      "untrusted_reason": "转写文本来自用户视频内容，可能包含指令样文本"
+    },
+    {
+      "tool_name": "read_scenario_prompt",
+      "version": "1.0.0",
+      "description": "按任务类型读取场景 prompt（monologue_clean / interview_compress / highlight_reel）",
+      "backend_impl": "backend/services/semantic_auditor.py:load_system_prompt",
+      "params_schema": { "type": "object", "required": ["task_type"], "properties": { "task_type": { "type": "string" } } },
+      "risk_level": "read_only",
+      "allowed_agent_types": ["orchestration", "execution"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "read_style_memory",
+      "version": "1.0.0",
+      "description": "读取用户风格记忆（backend/data/user_style.md）和领域词表（glossary.txt）",
+      "backend_impl": "backend/data/",
+      "params_schema": { "type": "object", "properties": {} },
+      "risk_level": "read_only",
+      "allowed_agent_types": ["execution"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "run_asr",
+      "version": "1.0.0",
+      "description": "对视频执行 ASR（FunASR 管道：VAD、分段、说话人平滑、字级时间戳）",
+      "backend_impl": "backend/services/asr_pipeline.py",
+      "params_schema": { "type": "object", "required": ["task_id"], "properties": { "task_id": { "type": "string" }, "video_id": { "type": ["string", "null"] } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration"],
+      "rate_limit": { "per_mission": 4 },
+      "marks_output_untrusted": true
+    },
+    {
+      "tool_name": "run_audit_postprocess",
+      "version": "1.0.0",
+      "description": "对模型审计决策执行代码级后处理：split 按字级时间戳切分、merge_next 合并、与相邻段缝合",
+      "backend_impl": "backend/services/semantic_auditor.py:parse_claude_response 及后处理器",
+      "params_schema": { "type": "object", "required": ["task_id", "decisions"], "properties": { "task_id": { "type": "string" }, "decisions": { "type": "array" } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "detect_product_occurrences",
+      "version": "1.0.0",
+      "description": "按 product_semantic 和连续时间边界识别产品场次，A-B-A 输出三个 occurrence",
+      "backend_impl": "backend/services/product_occurrence_detector.py:identify_product_occurrences",
+      "params_schema": { "type": "object", "required": ["segments"], "properties": { "segments": { "type": "array" }, "max_gap_seconds": { "type": "number", "default": 60.0 } } },
+      "risk_level": "read_only",
+      "allowed_agent_types": ["orchestration", "execution", "validation"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "build_highlight_strategies",
+      "version": "1.0.0",
+      "description": "为每个产品 occurrence 调用三套 Prompt 生成 faithful、balanced、concise，失败时确定性补齐",
+      "backend_impl": "backend/services/highlight_strategy_generator.py:generate_product_strategy_reels",
+      "params_schema": { "type": "object", "required": ["segments", "product_occurrences"], "properties": { "segments": { "type": "array" }, "product_occurrences": { "type": "array" } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration", "execution"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "write_audit_segments",
+      "version": "1.0.0",
+      "description": "把通过验证的审计结果写入任务（含 AuditSnapshot 版本快照），推进任务到 review 状态",
+      "backend_impl": "backend/services/task_store.py",
+      "params_schema": { "type": "object", "required": ["task_id", "segments"], "properties": { "task_id": { "type": "string" }, "segments": { "type": "array" } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "write_translation_cues",
+      "version": "1.0.0",
+      "description": "把通过验证的校准/翻译结果写回 TranslationVideo.cues",
+      "backend_impl": "backend/services/one_click_translate.py",
+      "params_schema": { "type": "object", "required": ["task_id", "video_id", "cues"], "properties": { "task_id": { "type": "string" }, "video_id": { "type": "string" }, "cues": { "type": "array" } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "generate_tts_audio",
+      "version": "1.0.0",
+      "description": "为翻译后的 cue 批量生成目标语言 TTS 音频（openai / mock / silent provider）",
+      "backend_impl": "backend/services/one_click_translate.py:generate_tts_audio_for_cues",
+      "params_schema": { "type": "object", "required": ["task_id", "video_id"], "properties": { "task_id": { "type": "string" }, "video_id": { "type": "string" }, "only_stale": { "type": "boolean", "default": true } } },
+      "risk_level": "write_external",
+      "requires_human_approval": false,
+      "approval_note": "profile.high_risk_actions 已声明；provider=openai 且 cue 数量 > 200 时运行时升级为需要确认（成本控制）",
+      "allowed_agent_types": ["orchestration"],
+      "rate_limit": { "per_mission": 3 },
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "compose_dubbed_video",
+      "version": "1.0.0",
+      "description": "按 cue.start 对齐合成完整音轨，替换原视频音轨生成预览视频",
+      "backend_impl": "backend/services/one_click_translate.py:compose_aligned_audio_track + mux_video_with_audio",
+      "params_schema": { "type": "object", "required": ["task_id", "video_id"], "properties": { "task_id": { "type": "string" }, "video_id": { "type": "string" } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "ffmpeg_export",
+      "version": "1.0.0",
+      "description": "FFmpeg 导出成片（chunk 合并、字幕烧录、多 clip 导出）",
+      "backend_impl": "backend/services/ffmpeg_executor.py",
+      "params_schema": { "type": "object", "required": ["task_id", "export_request"], "properties": { "task_id": { "type": "string" }, "export_request": { "type": "object" } } },
+      "risk_level": "irreversible",
+      "requires_human_approval": true,
+      "approval_note": "人工确认入口 = 前端 ReviewWorkbench 导出按钮，approval_token 由导出 API 请求携带",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "jianying_export",
+      "version": "1.0.0",
+      "description": "生成剪映草稿并写入剪映草稿目录",
+      "backend_impl": "backend/services/jianying_builder.py",
+      "params_schema": { "type": "object", "required": ["task_id"], "properties": { "task_id": { "type": "string" } } },
+      "risk_level": "write_external",
+      "requires_human_approval": true,
+      "approval_note": "同 ffmpeg_export，前端导出按钮即人工确认",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    },
+    {
+      "tool_name": "broadcast_task_status",
+      "version": "1.0.0",
+      "description": "通过 WebSocket 向前端推送任务状态与日志（ws://localhost:8000/ws/{task_id}）",
+      "backend_impl": "backend/main.py WebSocket 广播",
+      "params_schema": { "type": "object", "required": ["task_id", "status"], "properties": { "task_id": { "type": "string" }, "status": { "type": "string" }, "log": { "type": ["object", "null"] } } },
+      "risk_level": "write_internal",
+      "allowed_agent_types": ["orchestration"],
+      "marks_output_untrusted": false
+    }
+  ]
+}

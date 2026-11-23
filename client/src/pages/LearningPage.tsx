@@ -1,6 +1,6 @@
 /**
  * GoldenClip 学习模块页面
- * 上传原视频和人工剪辑视频，ASR 提取字幕，Claude 分析剪辑思路，生成版本化提示词
+ * 上传原视频和人工剪辑视频，ASR 提取字幕，OpenAI 分析剪辑思路，生成版本化提示词
  */
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
@@ -45,15 +45,21 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   type LearningTask,
   type LearningTaskStatus,
+  type LearningSource,
   type ManualPromptPack,
   fetchLearningTasks,
   fetchLearningTask,
-  createLearningTask,
+  createLearningTaskFromSource,
   deleteLearningTask,
+  fetchLearningSources,
   uploadOriginalVideo,
   uploadEditedVideo,
+  uploadLearningVariants,
   triggerLearningASR,
+  triggerLearningAlignment,
   triggerLearningAnalysis,
+  updateLearningDiff,
+  resolveLearningProposal,
   saveLearningPrompt,
   createLogWebSocket,
   formatDuration,
@@ -65,7 +71,7 @@ import {
   getLearningManualPromptStep2,
   submitLearningManualStep2,
 } from "@/lib/api";
-import { useAppConfig } from "@/hooks/useAppConfig";
+import { useAppConfig, buildFeatureRequestOptions } from "@/hooks/useAppConfig";
 import { ModelPickerPopover } from "@/components/ModelPickerPopover";
 import { cn } from "@/lib/utils";
 
@@ -103,7 +109,7 @@ const SCENARIOS: {
   {
     id: "interview_compress",
     icon: <Users className="w-6 h-6" />,
-    label: "访谈压缩",
+    label: "直播访谈压缩",
     tag: "Interview Compress",
     desc: "主播×嘉宾对谈、播客、深度访谈",
     color: "text-blue-400",
@@ -120,18 +126,18 @@ const SCENARIOS: {
   {
     id: "highlight_reel",
     icon: <Flame className="w-6 h-6" />,
-    label: "精彩集锦",
-    tag: "Highlight Reel",
-    desc: "抖音/B站/YouTube Shorts 爆款剪辑",
+    label: "直播卖货集锦",
+    tag: "Live Commerce Reel",
+    desc: "按产品拆分直播讲解，提炼卖点短视频",
     color: "text-orange-400",
     border: "border-orange-500/40",
     bg: "bg-orange-500/5",
     gradient: "from-orange-500/20 to-orange-500/5",
     rules: [
-      { code: "H1", name: "高能识别" },
-      { code: "H2", name: "前3秒钩子" },
-      { code: "H3", name: "节奏加速" },
-      { code: "H5", name: "废话零容忍" },
+      { code: "L1", name: "产品边界" },
+      { code: "L2", name: "产品开场" },
+      { code: "L3", name: "卖点故事" },
+      { code: "L4", name: "链接删除" },
     ],
   },
 ];
@@ -347,6 +353,7 @@ function LogPanel({ logs }: { logs: string[] }) {
   const sourceColorMap: Record<string, string> = {
     asr: "text-cyan-400",
     claude: "text-purple-400",
+    openai: "text-purple-400",
     ffmpeg: "text-orange-400",
     system: "text-slate-400",
   };
@@ -517,7 +524,7 @@ function ManualAnalysisDialog({
           </DialogTitle>
           <DialogDescription className="text-muted-foreground text-sm">
             {step === 1
-              ? "复制以下提示词到 Cursor / Claude 等工具运行，将 AI 输出的分析报告粘贴回来"
+              ? "复制以下提示词到 Cursor / ChatGPT 等工具运行，将 AI 输出的分析报告粘贴回来"
               : "复制以下提示词运行 AI，将输出的规则变更 JSON 粘贴回来"}
           </DialogDescription>
         </DialogHeader>
@@ -633,6 +640,8 @@ export default function LearningPage() {
 
   // 新建任务表单
   const [newName, setNewName] = useState("");
+  const [learningSources, setLearningSources] = useState<LearningSource[]>([]);
+  const [sourceTaskId, setSourceTaskId] = useState("");
   // newTaskType 跟随 activeScenario
   const newTaskType = activeScenario || "monologue_clean";
 
@@ -661,7 +670,7 @@ export default function LearningPage() {
   const [loadingCurrentPrompt, setLoadingCurrentPrompt] = useState(false);
 
   // WebSocket 引用
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<{ close: () => void } | null>(null);
 
   // 加载任务列表
   const loadTasks = useCallback(async () => {
@@ -674,6 +683,10 @@ export default function LearningPage() {
   }, []);
 
   useEffect(() => { loadTasks(); }, [loadTasks]);
+
+  useEffect(() => {
+    fetchLearningSources().then(setLearningSources).catch(() => setLearningSources([]));
+  }, []);
 
   // 选中任务后加载详情 + 轮询
   useEffect(() => {
@@ -696,13 +709,7 @@ export default function LearningPage() {
   // WebSocket 日志
   useEffect(() => {
     if (!selectedTaskId) return;
-    // #region agent log
-    fetch('http://127.0.0.1:7496/ingest/dd829ab7-cec4-4fd5-9bf8-f4d54528a53c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e5a0fe'},body:JSON.stringify({sessionId:'e5a0fe',location:'LearningPage.tsx:wsEffect',message:'ws_connect_attempt',data:{channel:`learn_${selectedTaskId}`},timestamp:Date.now(),hypothesisId:'CD'})}).catch(()=>{});
-    // #endregion
     const ws = createLogWebSocket(`learn_${selectedTaskId}`, (msg) => {
-      // #region agent log
-      if (msg.type === "log") fetch('http://127.0.0.1:7496/ingest/dd829ab7-cec4-4fd5-9bf8-f4d54528a53c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e5a0fe'},body:JSON.stringify({sessionId:'e5a0fe',location:'LearningPage.tsx:wsMsg',message:'ws_message_received',data:{type:msg.type,src:msg.source,msg:msg.message?.slice(0,80)},timestamp:Date.now(),hypothesisId:'CD'})}).catch(()=>{});
-      // #endregion
       if (msg.type === "log" && msg.message) {
         setLogs((prev) => [...prev.slice(-100), `[${msg.source}] ${msg.message}`]);
       }
@@ -727,11 +734,16 @@ export default function LearningPage() {
   // 创建新学习任务
   const handleCreate = async () => {
     if (!newName.trim()) { toast.error("请输入任务名称"); return; }
+    if (!sourceTaskId) { toast.error("请选择已审核的原视频任务"); return; }
     try {
-      const task = await createLearningTask({ name: newName.trim(), task_type: newTaskType });
+      const task = await createLearningTaskFromSource({
+        name: newName.trim(),
+        source_task_id: sourceTaskId,
+      });
       toast.success("学习任务创建成功");
       setShowNewDialog(false);
       setNewName("");
+      setSourceTaskId("");
       await loadTasks();
       setSelectedTaskId(task.id);
       setOriginalFile(null);
@@ -765,8 +777,13 @@ export default function LearningPage() {
     setEditedFile(file);
     setUploadingEdited(true);
     try {
-      await uploadEditedVideo(selectedTask.id, file, setEditedProgress);
-      toast.success("剪辑视频上传成功");
+      if (selectedTask.source_task_id) {
+        await uploadLearningVariants(selectedTask.id, [file]);
+        toast.success("精修集锦上传成功");
+      } else {
+        await uploadEditedVideo(selectedTask.id, file, setEditedProgress);
+        toast.success("剪辑视频上传成功");
+      }
       setSelectedTask(await fetchLearningTask(selectedTask.id));
     } catch (e: any) {
       toast.error(`上传失败: ${e.message}`);
@@ -780,8 +797,13 @@ export default function LearningPage() {
   const handleStartASR = async () => {
     if (!selectedTask) return;
     try {
-      await triggerLearningASR(selectedTask.id, "funasr");
-      toast.success("双轨 ASR 已启动");
+      if (selectedTask.source_task_id) {
+        await triggerLearningAlignment(selectedTask.id, "funasr");
+        toast.success("精修集锦 ASR 与差异对齐已启动");
+      } else {
+        await triggerLearningASR(selectedTask.id, "funasr");
+        toast.success("双轨 ASR 已启动");
+      }
       setLogs([]);
     } catch (e: any) {
       toast.error(e.message);
@@ -792,9 +814,10 @@ export default function LearningPage() {
   const handleStartAnalysis = async () => {
     if (!selectedTask) return;
     try {
+      const learningOpts = buildFeatureRequestOptions(config, "learning");
       await triggerLearningAnalysis(selectedTask.id, {
-        claude_api_key: config.claudeApiKey || undefined,
-        claude_model: config.claudeModel,
+        openai_api_key: learningOpts.openai_api_key,
+        openai_model: learningOpts.openai_model,
       });
       toast.success("学习分析已启动");
       setLogs([]);
@@ -875,9 +898,9 @@ export default function LearningPage() {
   };
 
   const t = selectedTask;
-  const canASR = !!(t && t.original_video_path && t.edited_video_path && t.status === "pending");
-  const canAnalyze = !!(t && t.status === "asr_done");
-  const isRunning = !!(t && ["asr_original", "asr_edited", "analyzing"].includes(t.status));
+  const canASR = !!(t && (t.source_task_id ? t.edited_variants.length > 0 : t.original_video_path && t.edited_video_path) && t.status === "pending");
+  const canAnalyze = !!(t && (t.status === "asr_done" || t.status === "diff_ready"));
+  const isRunning = !!(t && ["asr_original", "asr_edited", "aligning", "analyzing"].includes(t.status));
   const isDone = !!(t && t.status === "done");
 
   const currentScenario = SCENARIOS.find((s) => s.id === activeScenario);
@@ -892,7 +915,7 @@ export default function LearningPage() {
           </div>
           <h1 className="text-xl font-semibold text-foreground">选择学习场景</h1>
           <p className="text-sm text-muted-foreground mt-1.5">
-            上传原视频与人工剪辑对比，让 Claude 提炼编导的剪辑思路并更新提示词
+            上传原视频与人工剪辑对比，让 OpenAI 提炼编导的剪辑思路并更新提示词
           </p>
         </div>
 
@@ -1075,8 +1098,8 @@ export default function LearningPage() {
                 <span className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">1</span>
                 <h3 className="text-sm font-medium text-foreground">上传视频</h3>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <VideoUploadZone
+              <div className={cn("grid gap-4", t.source_task_id ? "grid-cols-1" : "grid-cols-2")}>
+                {!t.source_task_id && <VideoUploadZone
                   label="原视频"
                   icon={<Film className="w-8 h-8 text-muted-foreground/30" />}
                   file={originalFile}
@@ -1085,18 +1108,23 @@ export default function LearningPage() {
                   uploading={uploadingOriginal}
                   progress={originalProgress}
                   onFileSelect={handleUploadOriginal}
-                />
+                />}
                 <VideoUploadZone
-                  label="人工剪辑视频"
+                  label={t.source_task_id ? "添加精修集锦（可重复上传）" : "人工剪辑视频"}
                   icon={<Scissors className="w-8 h-8 text-muted-foreground/30" />}
                   file={editedFile}
-                  filename={t.edited_video_filename}
-                  duration={t.edited_video_duration}
+                  filename={t.source_task_id ? t.edited_variants[t.edited_variants.length - 1]?.filename : t.edited_video_filename}
+                  duration={t.source_task_id ? t.edited_variants[t.edited_variants.length - 1]?.duration : t.edited_video_duration}
                   uploading={uploadingEdited}
                   progress={editedProgress}
                   onFileSelect={handleUploadEdited}
                 />
               </div>
+              {t.source_task_id && (
+                <p className="text-xs text-muted-foreground">
+                  已关联原任务「{t.source_task_name}」，当前已有 {t.edited_variants.length} 个精修样本。
+                </p>
+              )}
             </div>
 
             {/* Step 2: ASR 提取 */}
@@ -1133,7 +1161,37 @@ export default function LearningPage() {
               )}
             </div>
 
-            {/* Step 3: Claude 分析 */}
+            {t.source_task_id && t.diff_items.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">3</span>
+                  <h3 className="text-sm font-medium text-foreground">确认学习差异</h3>
+                  <span className="text-xs text-muted-foreground">默认选择高置信差异</span>
+                </div>
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {t.diff_items.map((item) => (
+                    <label key={item.id} className="flex gap-3 rounded-lg border border-border p-3 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={item.selected}
+                        onChange={async (event) => {
+                          await updateLearningDiff(t.id, item.id, event.target.checked, item.note);
+                          setSelectedTask(await fetchLearningTask(t.id));
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-foreground">{item.source_text}</p>
+                        <p className="text-muted-foreground mt-1">
+                          {item.source_start.toFixed(1)}s–{item.source_end.toFixed(1)}s · {item.category} · 对齐置信度 {Math.round(item.confidence * 100)}%
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: OpenAI 分析 */}
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <span className={cn(
@@ -1157,7 +1215,7 @@ export default function LearningPage() {
                       <><Brain className="w-3 h-3 mr-1" />分析</>
                     )}
                   </Button>
-                  <ModelPickerPopover config={config} updateConfig={updateConfig} disabled={!canAnalyze || isRunning} />
+                  <ModelPickerPopover feature="learning" config={config} updateConfig={updateConfig} disabled={!canAnalyze || isRunning} />
                   <Button
                     onClick={() => setShowManualDialog(true)}
                     disabled={!canAnalyze || isRunning}
@@ -1190,6 +1248,38 @@ export default function LearningPage() {
                 </div>
               )}
             </div>
+
+            {t.source_task_id && t.proposals.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">4</span>
+                  <h3 className="text-sm font-medium text-foreground">学习修改草案</h3>
+                </div>
+                {t.proposals.map((proposal) => (
+                  <div key={proposal.id} className="rounded-lg border border-border p-3 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-foreground">{proposal.title}</p>
+                        <p className="text-muted-foreground mt-1">{proposal.target} · {proposal.rationale}</p>
+                      </div>
+                      {proposal.status === "pending" ? (
+                        <div className="flex gap-2 shrink-0">
+                          <Button size="sm" className="h-7 text-xs" onClick={async () => {
+                            await resolveLearningProposal(t.id, proposal.id, "apply");
+                            setSelectedTask(await fetchLearningTask(t.id));
+                          }}>应用</Button>
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => {
+                            await resolveLearningProposal(t.id, proposal.id, "reject");
+                            setSelectedTask(await fetchLearningTask(t.id));
+                          }}>忽略</Button>
+                        </div>
+                      ) : <span className="text-muted-foreground">{proposal.status}</span>}
+                    </div>
+                    {proposal.risk && <p className="mt-2 text-amber-500">风险：{proposal.risk}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Step 4: 新提示词（含老提示词对比） */}
             {t.new_prompt_content && (
@@ -1251,11 +1341,11 @@ export default function LearningPage() {
                       </div>
                     </div>
 
-                    {/* 右侧：新提示词（Claude 生成） */}
+                    {/* 右侧：新提示词（OpenAI 生成） */}
                     <div className="flex flex-col space-y-1.5">
                       <div className="flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-primary" />
-                        <span className="text-xs font-medium text-primary">新提示词（Claude 生成）</span>
+                        <span className="text-xs font-medium text-primary">新提示词（OpenAI 生成）</span>
                       </div>
                       <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 h-96 overflow-y-auto">
                         <pre className="text-xs text-foreground/90 whitespace-pre-wrap font-mono leading-relaxed">
@@ -1269,12 +1359,7 @@ export default function LearningPage() {
             )}
 
             {/* 日志面板 */}
-            {logs.length > 0 && (
-              // #region agent log
-              (() => { fetch('http://127.0.0.1:7496/ingest/dd829ab7-cec4-4fd5-9bf8-f4d54528a53c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e5a0fe'},body:JSON.stringify({sessionId:'e5a0fe',location:'LearningPage.tsx:logPanel',message:'log_panel_render',data:{logsCount:logs.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{}); return null; })(),
-              // #endregion
-              <LogPanel logs={logs} />
-            )}
+            {logs.length > 0 && <LogPanel logs={logs} />}
           </div>
         )}
       </div>
@@ -1288,7 +1373,7 @@ export default function LearningPage() {
               确认删除学习任务
             </DialogTitle>
             <DialogDescription className="text-muted-foreground text-sm">
-              该任务正在运行中（ASR 或 Claude 分析），删除后将立即终止所有相关后台任务，且无法恢复。
+              该任务正在运行中（ASR 或 OpenAI 分析），删除后将立即终止所有相关后台任务，且无法恢复。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2 mt-2">
@@ -1337,6 +1422,24 @@ export default function LearningPage() {
                 className="bg-secondary border-border text-foreground placeholder:text-muted-foreground/50"
                 autoFocus
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">已审核的原视频任务</Label>
+              <select
+                value={sourceTaskId}
+                onChange={(e) => setSourceTaskId(e.target.value)}
+                className="w-full h-9 rounded-md border border-border bg-secondary px-3 text-sm text-foreground"
+              >
+                <option value="">请选择原任务</option>
+                {learningSources
+                  .filter((source) => source.task_type === newTaskType)
+                  .map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}（{source.segments_count} 段，人工调整 {source.human_overrides}）
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-muted-foreground">创建后将冻结该任务的 ASR 与人工审核结果。</p>
             </div>
 
             <Button className="w-full" onClick={handleCreate}>

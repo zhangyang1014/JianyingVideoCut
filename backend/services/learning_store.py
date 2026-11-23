@@ -4,6 +4,7 @@ GoldenClip 学习任务存储
 """
 
 import json
+import os
 from typing import List, Optional, Dict
 from datetime import datetime
 from pathlib import Path
@@ -32,11 +33,18 @@ class LearningStore:
                 print(f"[LearningStore] 加载学习任务失败: {e}")
 
     def _save(self):
+        # 原子写：先落同目录临时文件，再 os.replace 替换，避免写入中途崩溃损坏数据
+        tmp_path = LEARNING_TASKS_FILE.parent / (LEARNING_TASKS_FILE.name + ".tmp")
         try:
-            with open(LEARNING_TASKS_FILE, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 tasks_list = [task.model_dump() for task in self._tasks.values()]
                 json.dump(tasks_list, f, ensure_ascii=False, indent=2, default=str)
+            os.replace(tmp_path, LEARNING_TASKS_FILE)
         except Exception as e:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
             print(f"[LearningStore] 保存学习任务失败: {e}", flush=True)
             raise
 
