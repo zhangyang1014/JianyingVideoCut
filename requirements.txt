@@ -19,6 +19,8 @@ pyJianYingDraft>=0.2.5
 # 说话人分离（ModelScope CAM++，无需 HuggingFace token）
 modelscope>=1.18.0
 funasr>=1.1.0
+torch>=2.5.0
+torchaudio>=2.5.0
 # modelscope 的隐式依赖（需手动声明）
 addict>=2.4.0
 simplejson>=3.19.0

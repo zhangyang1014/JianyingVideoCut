@@ -1,0 +1,58 @@
+name: agent-loop-reference-kit
+purpose: Portable knowledge base and reference code for autonomous agent loops
+source_project: designing-multiagent-systems
+source_components:
+  - code_along
+  - picoagents
+  - examples/agents/swe_agent
+  - obsidian_agent_notes
+obsidian_sources:
+  - 通用 Agent Prompt 模板库
+  - 通用 Agent Schema 与工程落地模板
+  - 通用企业级 Agent 系统超级模板
+  - 如何写Agent
+  - Agent 编排和调度 Orchestration
+  - Agent Memory
+  - Agent
+  - Agent的记忆memory RAG State
+  - Agent评测体系（Evals）
+recommended_copy_scope:
+  - README.md
+  - docs
+  - src
+  - examples
+  - prompts
+  - prompts/roles
+  - schemas
+  - memory_template
+  - LICENSES
+  - NOTICE.md
+  - THIRD_PARTY_NOTICES.md
+python_requires: ">=3.10"
+runtime_notes:
+  - Reference code expects an OpenAI-compatible chat client adapter.
+  - File and shell tools must be sandboxed before production use.
+  - Enterprise schemas are outer-layer contracts; kit source uses lighter types.
+reading_paths:
+  basic_loop:
+    - docs/01-core-handbook.md
+    - docs/05-autonomous-loop-blueprint.md
+    - docs/08-how-to-design-an-agent.md
+    - examples/01_minimal_streaming_agent.py
+  enterprise:
+    - docs/10-enterprise-agent-system.md
+    - docs/09-role-prompt-patterns.md
+    - prompts/roles
+    - schemas
+    - docs/14-production-readiness-checklist.md
+  memory_orchestration_evals:
+    - docs/12-memory-rag-state.md
+    - docs/06-orchestration-patterns.md
+    - docs/11-orchestration-reliability.md
+    - docs/13-runtime-harness.md
+    - docs/15-evals-system.md
+  copy_to_project:
+    - docs/16-copy-to-new-project-manual.md
+    - prompts/copy_kit_to_project_prompt.md
+    - memory_template/project_context.md
+    - docs/14-production-readiness-checklist.md

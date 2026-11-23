@@ -1,0 +1,28 @@
+{
+  "structure": {
+    "name": "digital-presenter-script-structure",
+    "title": "数字人口播结构",
+    "prompt_file": ".cursor/skills/digital-presenter-script-structure/SKILL.md",
+    "timing": "AI 起稿时调用。先安排开场、首答、正文层次和收尾，再写出口播初稿。"
+  },
+  "polish": {
+    "name": "digital-presenter-spoken-polish",
+    "title": "数字人口播文字润色",
+    "prompt_file": ".cursor/skills/digital-presenter-spoken-polish/SKILL.md",
+    "timing": "初稿完成后单独调用。调整用词、句式和口播语气，保留结构、原意与已核实的事实。"
+  },
+  "creators": {
+    "lina": {
+      "structure": {
+        "name": "lina-short-video-structure",
+        "title": "Lina 短视频结构",
+        "prompt_file": ".cursor/skills/lina-short-video-structure/SKILL.md",
+        "timing": "AI 起稿时调用。按 Lina 的结构规则安排开场、首次实答、正文分层和收尾。"
+      },
+      "polish_overlay": {
+        "title": "Lina 口播语气润色",
+        "prompt_file": "domains/goldenclip/overlays/lina_spoken_polish.md"
+      }
+    }
+  }
+}

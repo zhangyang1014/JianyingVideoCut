@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "handoff.schema.json",
+  "title": "Handoff",
+  "type": "object",
+  "required": ["handoff_id", "mission_id", "from_agent", "status", "summary"],
+  "properties": {
+    "handoff_id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "from_agent": { "type": "string" },
+    "to_agent": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+    "status": { "type": "string", "enum": ["completed", "failed", "blocked", "needs_review"] },
+    "summary": { "type": "string" },
+    "completed_work": { "type": "array", "items": { "type": "object" } },
+    "not_completed": { "type": "array", "items": { "type": "object" } },
+    "key_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "decision": { "type": "string" },
+          "reason": { "type": "string" },
+          "evidence": { "type": "array" }
+        }
+      }
+    },
+    "tool_calls_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool_name": { "type": "string" },
+          "status": { "type": "string", "enum": ["success", "failed"] },
+          "important_result": { "type": "string" }
+        }
+      }
+    },
+    "evidence": { "type": "array", "items": { "type": "object" } },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "open_questions": { "type": "array", "items": { "type": "string" } },
+    "recommended_next_steps": { "type": "array", "items": { "type": "string" } },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

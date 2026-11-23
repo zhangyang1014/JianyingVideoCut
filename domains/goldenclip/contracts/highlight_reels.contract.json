@@ -1,0 +1,115 @@
+{
+  "$schema": "agent.validation_contract",
+  "contract_id": "goldenclip.highlight_reels@3",
+  "mission_id": null,
+  "milestone_id": null,
+  "target": "由 audit_segments 派生的 highlight_reels 计划",
+  "assertions": [
+    {
+      "assertion_id": "HR-01",
+      "kind": "code",
+      "description": "每个集锦必须有非空标题",
+      "check": { "type": "custom_fn", "params": { "fn": "check_reel_titles" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-02",
+      "kind": "code",
+      "description": "每条 canonical 集锦必须有 segment_ids",
+      "check": { "type": "custom_fn", "params": { "fn": "check_reel_segment_refs" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-03",
+      "kind": "code",
+      "description": "segment_ids 不得重复",
+      "check": { "type": "custom_fn", "params": { "fn": "check_unique_segment_refs" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-04",
+      "kind": "code",
+      "description": "segment_ids 必须引用存在且保留的片段",
+      "check": { "type": "custom_fn", "params": { "fn": "check_existing_kept_segment_refs" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-05",
+      "kind": "code",
+      "description": "不得引用非保留片段",
+      "check": { "type": "custom_fn", "params": { "fn": "check_kept_segment_refs" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-06",
+      "kind": "code",
+      "description": "片段必须严格保持源时间顺序，确保元数据与实际导出一致",
+      "check": { "type": "custom_fn", "params": { "fn": "check_source_order" } },
+      "severity": "major",
+      "on_fail": "flag_for_human"
+    },
+    {
+      "assertion_id": "HR-10",
+      "kind": "code",
+      "description": "不得保留 CTA、链接或跨产品串场等不可用片段",
+      "check": { "type": "custom_fn", "params": { "fn": "check_highlight_eligibility" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-21",
+      "kind": "code",
+      "description": "每个 product group 最终必须且只能有一条最佳集锦",
+      "check": { "type": "custom_fn", "params": { "fn": "check_product_group_single_winner" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-22",
+      "kind": "code",
+      "description": "最终集锦必须引用已知 product group",
+      "check": { "type": "custom_fn", "params": { "fn": "check_known_product_group" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-23",
+      "kind": "code",
+      "description": "集锦只能引用自身 product group 的片段",
+      "check": { "type": "custom_fn", "params": { "fn": "check_product_group_bounds" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "HR-27",
+      "kind": "code",
+      "description": "最终集锦必须保留产品名/品类和核心卖点锚点",
+      "check": { "type": "custom_fn", "params": { "fn": "check_winner_anchors" } },
+      "severity": "major",
+      "on_fail": "flag_for_human"
+    },
+    {
+      "assertion_id": "HR-29",
+      "kind": "code",
+      "description": "产品名、别名或清晰品类应在前两句出现",
+      "check": { "type": "custom_fn", "params": { "fn": "check_opening_anchor_position" } },
+      "severity": "minor",
+      "on_fail": "flag_for_human"
+    },
+    {
+      "assertion_id": "HR-28",
+      "kind": "code",
+      "description": "最终计划不得包含同一产品的重复集锦",
+      "check": { "type": "custom_fn", "params": { "fn": "check_unique_product_group_winners" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    }
+  ],
+  "required_validators": ["validate.highlight_reels"],
+  "pass_rule": "blockers_reject; majors_and_minors_flag_for_human"
+}

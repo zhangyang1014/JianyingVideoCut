@@ -7,48 +7,199 @@ Strategy: -c copy for lossless cuts, concat demuxer for joining
 Formula: Target_Start_n = Σ Duration_i (i=1 to n-1)
 """
 
-import os
-import re as _re
-import subprocess
 import asyncio
 import functools
+import hashlib
+import json
+import os
+import re as _re
+import shutil
+import signal
+import subprocess
 import tempfile
+import threading
+import time
+import uuid
 from typing import List, Optional, Callable, Tuple
 from pathlib import Path
 
-from ..models.task import Segment, SegmentAction, TaskParams, SubtitleStyle, HookConfig
+from .subtitle_chunks import parse_srt, chunk_srt
+from ..models.task import RenderProfile, Segment, SegmentAction, TaskParams, SubtitleStyle
 from .subprocess_utils import run_text_subprocess
+from .render_profiles import build_scale_filter, get_render_profile_settings
+from .render_quality_validator import validate_rendered_media
+from .subtitle_text import get_effective_subtitle_text
 
 EXPORTS_DIR = Path(__file__).parent.parent.parent / "exports"
+CHUNK_CACHE_DIR = EXPORTS_DIR / ".chunk_cache"
+MAX_FFMPEG_ATTEMPTS = 4
 
 # 按 task_id 存储当前运行中的 FFmpeg 子进程，用于支持导出中止
 _active_processes: dict[str, subprocess.Popen] = {}
+_process_cleanup_paths: dict[str, set[Path]] = {}
+_cancelled_exports: set[str] = set()
+_process_lock = threading.Lock()
+_output_claims: set[str] = set()
+_output_claims_lock = threading.Lock()
+_chunk_locks: dict[str, threading.Lock] = {}
+_chunk_locks_guard = threading.Lock()
 
 
-def register_process(task_id: str, proc: "subprocess.Popen[str]") -> None:
+def register_process(
+    task_id: str,
+    proc: "subprocess.Popen[str]",
+    cleanup_paths: Optional[List[Path]] = None,
+) -> None:
     """注册正在运行的 FFmpeg 子进程。"""
-    _active_processes[task_id] = proc
+    with _process_lock:
+        _active_processes[task_id] = proc
+        if cleanup_paths:
+            _process_cleanup_paths.setdefault(task_id, set()).update(cleanup_paths)
 
 
 def unregister_process(task_id: str) -> None:
     """注销已完成的 FFmpeg 子进程。"""
-    _active_processes.pop(task_id, None)
+    with _process_lock:
+        _active_processes.pop(task_id, None)
 
 
-def kill_export(task_id: str) -> bool:
+def is_export_process_alive(task_id: str) -> bool:
+    """只读检查：指定 task_id 的 FFmpeg 子进程是否仍在运行（不修改注册表）。"""
+    with _process_lock:
+        proc = _active_processes.get(task_id)
+    if proc is None:
+        return False
+    return proc.poll() is None
+
+
+def _signal_process(proc: "subprocess.Popen[str]", sig: int) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    if sig == signal.SIGTERM:
+        proc.terminate()
+    else:
+        proc.kill()
+
+
+def _cleanup_registered_parts(task_id: str) -> None:
+    with _process_lock:
+        paths = _process_cleanup_paths.pop(task_id, set())
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def kill_export(task_id: str, timeout: float = 3.0) -> bool:
     """
     终止指定任务的 FFmpeg 子进程。
     发送 SIGTERM，FFmpeg 会做清理后退出。
     返回 True 表示成功发送终止信号，False 表示无进程可杀。
     """
-    proc = _active_processes.pop(task_id, None)
-    if proc:
+    with _process_lock:
+        proc = _active_processes.pop(task_id, None)
+        _cancelled_exports.add(task_id)
+    if proc is not None:
         try:
-            proc.terminate()
+            _signal_process(proc, signal.SIGTERM)
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                _signal_process(proc, signal.SIGKILL)
+                proc.wait(timeout=timeout)
+            except Exception:
+                pass
         except Exception:
             pass
+        finally:
+            _cleanup_registered_parts(task_id)
         return True
+    _cleanup_registered_parts(task_id)
     return False
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part_path = path.with_name(f"{path.name}.part-{uuid.uuid4().hex}")
+    try:
+        with open(part_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(part_path, path)
+    finally:
+        part_path.unlink(missing_ok=True)
+
+
+def _stable_fingerprint(payload: dict) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _source_snapshot(video_path: str) -> dict:
+    stat = os.stat(video_path)
+    return {
+        "path": str(Path(video_path).resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def _get_chunk_lock(fingerprint: str) -> threading.Lock:
+    with _chunk_locks_guard:
+        return _chunk_locks.setdefault(fingerprint, threading.Lock())
+
+
+_PERMANENT_FFMPEG_ERRORS = (
+    "no such file or directory",
+    "invalid argument",
+    "unrecognized option",
+    "option not found",
+    "error parsing options",
+    "unable to find a suitable output format",
+)
+
+
+def _is_permanent_ffmpeg_failure(cmd: List[str], output: str) -> bool:
+    for index, token in enumerate(cmd[:-1]):
+        if token == "-i" and not Path(cmd[index + 1]).exists():
+            return True
+    lowered = output.lower()
+    return any(marker in lowered for marker in _PERMANENT_FFMPEG_ERRORS)
+
+
+def execute_with_retry(
+    cmd: List[str],
+    *,
+    task_id: Optional[str] = None,
+    cleanup_paths: Optional[List[Path]] = None,
+    max_attempts: int = MAX_FFMPEG_ATTEMPTS,
+) -> tuple[bool, str]:
+    """统一执行 FFmpeg；仅对瞬时非确定故障最多尝试三次。"""
+    last_output = ""
+    for attempt in range(1, max_attempts + 1):
+        if task_id and task_id in _cancelled_exports:
+            return False, "export cancelled"
+        success, last_output = _run_ffmpeg(
+            cmd,
+            task_id=task_id,
+            cleanup_paths=cleanup_paths,
+        )
+        if success:
+            return True, last_output
+        if (
+            (task_id and task_id in _cancelled_exports)
+            or _is_permanent_ffmpeg_failure(cmd, last_output)
+            or attempt >= max_attempts
+        ):
+            break
+        time.sleep(min(0.25 * (2 ** (attempt - 1)), 1.0))
+    return False, last_output
 
 
 def _hex_to_ass_color(hex_str: str) -> str:
@@ -88,53 +239,11 @@ def _build_force_style(style: SubtitleStyle, video_width: int = 0, video_height:
         f"MarginV={margin_v}",
         f"MarginL={style.margin_l}",
         f"MarginR={style.margin_r}",
-        "WrapStyle=0",  # end-of-line wrap within margins
     ]
     return ",".join(parts)
 
 
 # subtitle_fix / text_fix / merge_next 均视频不剪切，归入保留集合
-import sys as _sys
-
-
-def _get_default_font(bold: bool = False) -> str:
-    if _sys.platform == "win32":
-        return "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc"
-    if _sys.platform == "darwin":
-        return "/System/Library/Fonts/PingFang.ttc"
-    return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-
-
-def _hex_to_ffmpeg_color(hex_str: str) -> str:
-    """将 #RRGGBB 转为 ffmpeg drawtext 颜色格式 0xRRGGBB。"""
-    h = hex_str.lstrip("#")
-    if len(h) == 6:
-        return f"0x{h.upper()}"
-    return "0xFFFFFF"
-
-
-def _build_drawtext_filter(hook: "HookConfig") -> str:
-    """将 HookConfig 转为 FFmpeg drawtext 滤镜字符串。"""
-    if hook.x_pct is not None and hook.y_pct is not None:
-        # 精确百分比定位：文字中心对齐到 (x_pct%, y_pct%) 处
-        x = f"(w*{hook.x_pct/100:.4f}-text_w/2)"
-        y = f"(h*{hook.y_pct/100:.4f}-text_h/2)"
-    else:
-        x = {"left": "40", "right": "w-text_w-40"}.get(hook.h_align, "(w-text_w)/2")
-        y = {"top": "60", "bottom": "h-text_h-60"}.get(hook.v_align, "(h-text_h)/2")
-    text = hook.text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:").replace(",", "\\,")
-    # Use bold font file instead of bold=1 (removed in ffmpeg 8.x)
-    font = _get_default_font(hook.bold).replace(":", "\\:")
-    color = _hex_to_ffmpeg_color(hook.color)
-    border_color = _hex_to_ffmpeg_color(hook.outline_color)
-    return (
-        f"drawtext=fontfile='{font}':text='{text}':"
-        f"fontsize={hook.font_size}:fontcolor={color}:"
-        f"borderw={hook.outline}:bordercolor={border_color}:"
-        f"x={x}:y={y}:enable='between(t\\,0\\,{hook.duration})'"
-    )
-
-
 _KEPT_ACTIONS = (
     SegmentAction.KEEP,
     SegmentAction.SUBTITLE_FIX,
@@ -158,12 +267,7 @@ def _get_subtitle_text(seg: Segment, params: Optional[TaskParams] = None) -> str
     - subtitle_fix / text_fix：优先使用 display_text（修正后文本）
     - show_speaker_label=True：在文本前追加 [说话人] 前缀
     """
-    text = (seg.display_text or seg.text or "").strip()
-    if params and params.show_speaker_label and seg.speaker:
-        speaker_names = params.speaker_names or {}
-        label = speaker_names.get(seg.speaker, seg.speaker)
-        text = f"[{label}] {text}"
-    return text
+    return get_effective_subtitle_text(seg, params)
 
 
 def _find_line_break_time(seg: Segment) -> Optional[float]:
@@ -507,25 +611,6 @@ def generate_srt(
                 else:
                     cards = [(text, seg.start, seg.end)]
 
-                # 对每张卡片：若单行超出屏幕宽度，插入换行符防止溢出
-                if subtitle_style:
-                    vw = video_width or 1080
-                    available_px = max(1, vw - subtitle_style.margin_l - subtitle_style.margin_r)
-                    chars_per_line = max(1, int(available_px / subtitle_style.font_size * 0.88))
-                    wrapped_cards = []
-                    for card_text, cs, ce in cards:
-                        if len(card_text) > chars_per_line:
-                            lines_out = []
-                            remaining = card_text
-                            while len(remaining) > chars_per_line:
-                                lines_out.append(remaining[:chars_per_line])
-                                remaining = remaining[chars_per_line:]
-                            if remaining:
-                                lines_out.append(remaining)
-                            card_text = "\n".join(lines_out)
-                        wrapped_cards.append((card_text, cs, ce))
-                    cards = wrapped_cards
-
                 for card_text, card_raw_start, card_raw_end in cards:
                     raw_s = max(seg.start, min(seg.end, card_raw_start))
                     raw_e = max(seg.start, min(seg.end, card_raw_end))
@@ -541,32 +626,108 @@ def generate_srt(
 
         chunk_cursor += chunk_duration
 
-    Path(srt_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(srt_path, "w", encoding="utf-8") as f:
+    target = Path(srt_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part_path = target.with_name(f"{target.name}.part")
+    with open(part_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(part_path, target)
     return srt_path
 
 
-def _run_ffmpeg(cmd: List[str], log_callback=None, task_id: Optional[str] = None) -> tuple[bool, str]:
+def _run_ffmpeg(
+    cmd: List[str],
+    log_callback=None,
+    task_id: Optional[str] = None,
+    cleanup_paths: Optional[List[Path]] = None,
+) -> tuple[bool, str]:
     """Run FFmpeg command and return (success, output)."""
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=(os.name == "posix"),
     )
     # 注册进程，支持外部通过 kill_export 终止
     if task_id:
-        register_process(task_id, process)
+        register_process(task_id, process, cleanup_paths)
     try:
-        stdout_b, stderr_b = process.communicate()
+        stdout, stderr = process.communicate()
     finally:
         # 无论正常完成还是被终止，都清理注册表
         if task_id:
             unregister_process(task_id)
     success = process.returncode == 0
-    raw = stderr_b if stderr_b else stdout_b
-    output = raw.decode("utf-8", errors="replace") if raw else ""
+    output = stderr if stderr else stdout
     return success, output
+
+
+def _chunk_cache_descriptor(
+    video_path: str,
+    chunk_start: float,
+    chunk_end: float,
+    render_profile: RenderProfile,
+    subtitle_overlay: Optional[dict] = None,
+) -> tuple[str, dict]:
+    profile = get_render_profile_settings(render_profile)
+    payload = {
+        "version": 1,
+        "source": _source_snapshot(video_path),
+        "start_us": round(chunk_start * 1_000_000),
+        "end_us": round(chunk_end * 1_000_000),
+        "render": {
+            "max_long_edge": profile.max_long_edge,
+            "preset": profile.preset,
+            "crf": profile.crf,
+            "video_codec": "libx264",
+            "audio_codec": "aac",
+            "audio_bitrate": "192k",
+        },
+    }
+    if subtitle_overlay:
+        payload["subtitle_overlay"] = subtitle_overlay
+    return _stable_fingerprint(payload), payload
+
+
+def _cached_chunk_is_valid(path: Path, expected_duration: float) -> bool:
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    return validate_rendered_media(str(path), expected_duration).passed
+
+
+def _encode_or_reuse_chunk(
+    *,
+    cmd: List[str],
+    chunk_path: Path,
+    chunk_part: Path,
+    expected_duration: float,
+    fingerprint: str,
+    task_id: Optional[str],
+) -> tuple[bool, str, bool]:
+    """串行发布同一 fingerprint chunk，返回 success/output/reused。"""
+    lock = _get_chunk_lock(fingerprint)
+    with lock:
+        if _cached_chunk_is_valid(chunk_path, expected_duration):
+            return True, "cached", True
+        chunk_part.unlink(missing_ok=True)
+        success, output = execute_with_retry(
+            cmd,
+            task_id=task_id,
+            cleanup_paths=[chunk_part],
+        )
+        if not success:
+            chunk_part.unlink(missing_ok=True)
+            return False, output, False
+        if not _cached_chunk_is_valid(chunk_part, expected_duration):
+            chunk_part.unlink(missing_ok=True)
+            return False, "chunk failed ffprobe quality validation", False
+        os.replace(chunk_part, chunk_path)
+        return True, output, False
 
 
 def _merge_contiguous_chunks(
@@ -598,6 +759,19 @@ def _merge_contiguous_chunks(
     return chunks
 
 
+def get_expected_export_duration(
+    segments: List[Segment],
+    golden_quote_order: Optional[List[str]] = None,
+) -> float:
+    """按实际导出 chunk 计算输出时间轴时长。"""
+    if golden_quote_order:
+        golden_segs, remaining_segs = _reorder_segments_for_golden_quotes(segments, golden_quote_order)
+        chunks = _build_golden_quote_chunks(golden_segs, remaining_segs)
+    else:
+        chunks = _merge_contiguous_chunks(segments)
+    return sum(max(0.0, end - start) for start, end in chunks)
+
+
 async def export_ffmpeg_lossless(
     video_path: str,
     segments: List[Segment],
@@ -608,9 +782,7 @@ async def export_ffmpeg_lossless(
     task_id: Optional[str] = None,
     subtitle_style: Optional[SubtitleStyle] = None,
     golden_quote_order: Optional[List[str]] = None,
-    hook_config: Optional[HookConfig] = None,
-    cover_image_base64: Optional[str] = None,
-    cover_duration: float = 2.0,
+    render_profile: RenderProfile = RenderProfile.FINAL,
 ) -> bool:
     """
     Export video using FFmpeg re-encode cut + concat.
@@ -624,17 +796,23 @@ async def export_ffmpeg_lossless(
 
     Steps:
     1. 合并连续保留段为 chunks（含金句前置逻辑）
-    2. 对每个 chunk 做一次 FFmpeg 重编码切割
-    3. concat demuxer 拼接所有 chunks
-    4. (可选) burn_subtitles=True 时，用 -vf subtitles= 烧录字幕
+    2. 对每个 chunk 做一次 FFmpeg 重编码，按该块的局部时间轴同时烧录字幕
+    3. concat demuxer 直接复制音视频流；字幕内容和样式进入块缓存指纹
     """
     kept_segments = [s for s in segments if s.action in _KEPT_ACTIONS]
+    profile_settings = get_render_profile_settings(render_profile)
+    output_target = Path(output_path)
+    output_part = output_target.with_name(f"{output_target.name}.part")
+    output_claim = str(output_target.resolve())
 
     if not kept_segments:
         if log_callback:
             await log_callback("error", "ffmpeg", "没有需要保留的片段")
         return False
-
+    if not Path(video_path).exists():
+        if log_callback:
+            await log_callback("error", "ffmpeg", "源视频不存在")
+        return False
     if golden_quote_order:
         golden_segs, remaining_segs = _reorder_segments_for_golden_quotes(segments, golden_quote_order)
         chunks = _build_golden_quote_chunks(golden_segs, remaining_segs)
@@ -654,62 +832,94 @@ async def export_ffmpeg_lossless(
             f"共 {len(kept_segments)} 个保留段，合并为 {len(chunks)} 个连续块"
         )
 
-    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    temp_dir = Path(tempfile.mkdtemp(prefix="goldenclip_"))
-    chunk_files = []
-
-    # ---- 封面图片转视频 chunk（若提供）
-    cover_chunk_path: Optional[Path] = None
-    if cover_image_base64:
-        try:
-            import base64 as _b64
-            raw = cover_image_base64
-            if raw.startswith("data:"):
-                raw = raw.split(",", 1)[1]
-            img_bytes = _b64.b64decode(raw)
-            cover_img_path = temp_dir / "cover_input.png"
-            cover_img_path.write_bytes(img_bytes)
-
-            vinfo = get_video_info(video_path)
-            vw = vinfo.get("width", 1080)
-            vh = vinfo.get("height", 1920)
-
-            cover_chunk_path = temp_dir / "cover_chunk.mp4"
-            cmd_cover = [
-                "ffmpeg", "-y",
-                "-loop", "1",
-                "-i", str(cover_img_path),
-                "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
-                "-t", str(cover_duration),
-                "-vf", f"scale={vw}:{vh}:force_original_aspect_ratio=decrease,pad={vw}:{vh}:(ow-iw)/2:(oh-ih)/2,setsar=1",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "18",
-                "-pix_fmt", "yuv420p",
-                "-r", "25",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-shortest",
-                str(cover_chunk_path),
-            ]
-            loop = asyncio.get_event_loop()
-            ok, out = await loop.run_in_executor(None, functools.partial(_run_ffmpeg, cmd_cover, task_id=task_id))
-            if ok:
-                if log_callback:
-                    await log_callback("info", "ffmpeg", f"封面图片转视频完成（{cover_duration}s）")
-            else:
-                if log_callback:
-                    await log_callback("warn", "ffmpeg", f"封面转视频失败，跳过封面: {out[:200]}")
-                cover_chunk_path = None
-        except Exception as e:
+    subtitle_cues = []
+    force_style = ""
+    if burn_subtitles:
+        if not srt_path or not Path(srt_path).is_file():
             if log_callback:
-                await log_callback("warn", "ffmpeg", f"封面处理异常，跳过: {e}")
-            cover_chunk_path = None
+                await log_callback("error", "ffmpeg", "字幕文件不存在，未生成导出文件")
+            return False
+        try:
+            subtitle_cues = parse_srt(Path(srt_path).read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            if log_callback:
+                await log_callback("error", "ffmpeg", str(exc))
+            return False
+        if subtitle_style:
+            info = get_video_info(video_path)
+            force_style = _build_force_style(subtitle_style, video_width=info.get("width", 0), video_height=info.get("height", 0))
+        if log_callback:
+            await log_callback("info", "ffmpeg", "字幕随连续块一次编码，拼接直接复用音视频流")
+
+    output_target.parent.mkdir(parents=True, exist_ok=True)
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    chunk_cache_dir = EXPORTS_DIR / ".chunk_cache" / "chunks"
+    manifest_dir = EXPORTS_DIR / ".chunk_cache" / "manifests"
+    chunk_cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = Path(tempfile.mkdtemp(prefix="goldenclip_"))
+    chunk_files: List[Path] = []
+    chunk_entries: List[dict] = []
+    source_snapshot = _source_snapshot(video_path)
+    subtitle_files: List[Optional[Path]] = []
+    output_cursor = 0.0
+    for chunk_start, chunk_end in chunks:
+        duration = chunk_end - chunk_start
+        local_srt = chunk_srt(subtitle_cues, output_cursor, output_cursor + duration)
+        output_cursor += duration
+        subtitle_file = None
+        if local_srt:
+            subtitle_file = temp_dir / f"subtitles_{len(subtitle_files)}.srt"
+            subtitle_file.write_text(local_srt, encoding="utf-8")
+        subtitle_files.append(subtitle_file)
+        fingerprint, descriptor = _chunk_cache_descriptor(
+            video_path,
+            chunk_start,
+            chunk_end,
+            render_profile,
+            subtitle_overlay={"version": 1, "srt": local_srt, "force_style": force_style} if local_srt else None,
+        )
+        chunk_entries.append({
+            "fingerprint": fingerprint,
+            "descriptor": descriptor,
+            "path": str(chunk_cache_dir / f"{fingerprint}.mp4"),
+            "status": "pending",
+        })
+    manifest_fingerprint = _stable_fingerprint({
+        "version": 1,
+        "source": source_snapshot,
+        "chunks": [entry["fingerprint"] for entry in chunk_entries],
+    })
+    manifest_path = manifest_dir / f"{manifest_fingerprint}.json"
+    manifest = {
+        "version": 1,
+        "fingerprint": manifest_fingerprint,
+        "source": source_snapshot,
+        "chunks": chunk_entries,
+    }
+    _atomic_write_json(manifest_path, manifest)
+
+    with _output_claims_lock:
+        output_conflict = output_claim in _output_claims
+        if not output_conflict:
+            _output_claims.add(output_claim)
+    if output_conflict:
+        if log_callback:
+            await log_callback("error", "ffmpeg", "相同导出目标正在生成，拒绝并发覆盖")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return False
+    if task_id:
+        with _process_lock:
+            _cancelled_exports.discard(task_id)
 
     try:
+        output_part.unlink(missing_ok=True)
         total = len(chunks)
         for i, (chunk_start, chunk_end) in enumerate(chunks):
-            chunk_path = temp_dir / f"chunk_{i:04d}.mp4"
+            entry = chunk_entries[i]
+            chunk_path = Path(entry["path"])
+            part_owner = task_id or uuid.uuid4().hex
+            chunk_part = chunk_path.with_name(f"{chunk_path.name}.part-{_re.sub(r'[^A-Za-z0-9_.-]', '_', part_owner)}")
             duration = chunk_end - chunk_start
 
             if log_callback:
@@ -725,147 +935,124 @@ async def export_ffmpeg_lossless(
                 "-ss", str(chunk_start),
                 "-i", video_path,
                 "-t", str(duration),
+            ]
+            filters = []
+            scale_filter = build_scale_filter(profile_settings.max_long_edge)
+            if scale_filter:
+                filters.append(scale_filter)
+            if subtitle_files[i]:
+                # 临时路径只使用安全固定文件名；PTS 从当前块的首帧开始。
+                escaped_srt = str(subtitle_files[i]).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+                filters.insert(0, "setpts=PTS-STARTPTS")
+                subtitle_filter = f"subtitles='{escaped_srt}'"
+                if force_style:
+                    subtitle_filter += f":force_style='{force_style}'"
+                filters.append(subtitle_filter)
+            if filters:
+                cmd += ["-vf", ",".join(filters)]
+            cmd += [
                 "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "18",
+                "-preset", profile_settings.preset,
+                "-crf", str(profile_settings.crf),
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-avoid_negative_ts", "make_zero",
-                str(chunk_path)
+                "-f", "mp4",
+                str(chunk_part),
             ]
 
-            # 使用 run_in_executor 在线程池中执行阻塞的 FFmpeg 调用，
-            # 避免阻塞 asyncio 事件循环，使取消请求能被及时处理
+            loop = asyncio.get_event_loop()
+            success, output, reused = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    _encode_or_reuse_chunk,
+                    cmd=cmd,
+                    chunk_path=chunk_path,
+                    chunk_part=chunk_part,
+                    expected_duration=duration,
+                    fingerprint=entry["fingerprint"],
+                    task_id=task_id,
+                ),
+            )
+            if not success:
+                entry["status"] = "failed"
+                entry["error"] = output[:500]
+                _atomic_write_json(manifest_path, manifest)
+                if log_callback:
+                    await log_callback("error", "ffmpeg", f"块 {i+1} 切割失败，导出终止: {output[:200]}")
+                return False
+
+            entry["status"] = "reused" if reused else "succeeded"
+            entry.pop("error", None)
+            _atomic_write_json(manifest_path, manifest)
+            chunk_files.append(chunk_path)
+
+        if len(chunk_files) != len(chunks):
+            if log_callback:
+                await log_callback("error", "ffmpeg", "分块产物不完整")
+            return False
+
+        # 单块仍复制到 .part，校验后才原子发布；缓存文件永久保留供新 job 恢复。
+        if task_id and task_id in _cancelled_exports:
+            return False
+        if len(chunk_files) == 1:
+            shutil.copyfile(chunk_files[0], output_part)
+        else:
+            concat_file = temp_dir / "concat.txt"
+            with open(concat_file, "w", encoding="utf-8") as f:
+                for cp in chunk_files:
+                    escaped_path = str(cp).replace("'", "'\\''")
+                    f.write(f"file '{escaped_path}'\n")
+
+            if log_callback:
+                await log_callback("info", "ffmpeg", f"正在拼接 {len(chunk_files)} 个块...")
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0", "-i", str(concat_file),
+                "-c", "copy", "-f", "mp4", str(output_part),
+            ]
+
             loop = asyncio.get_event_loop()
             success, output = await loop.run_in_executor(
-                None, functools.partial(_run_ffmpeg, cmd, task_id=task_id)
+                None,
+                functools.partial(
+                    execute_with_retry,
+                    cmd,
+                    task_id=task_id,
+                    cleanup_paths=[output_part],
+                ),
             )
             if not success:
                 if log_callback:
-                    await log_callback("warn", "ffmpeg", f"块 {i+1} 切割失败，跳过: {output[:200]}")
-                continue
+                    await log_callback("error", "ffmpeg", f"拼接失败: {output[:300]}")
+                return False
 
-            chunk_files.append(chunk_path)
-
-        if not chunk_files:
+        expected_duration = get_expected_export_duration(segments, golden_quote_order)
+        quality_report = validate_rendered_media(str(output_part), expected_duration)
+        if not quality_report.passed:
             if log_callback:
-                await log_callback("error", "ffmpeg", "所有块切割失败")
+                await log_callback("error", "ffmpeg", "导出 .part 未通过 ffprobe 质量校验")
             return False
-
-        # 封面 chunk 前置
-        if cover_chunk_path and cover_chunk_path.exists():
-            chunk_files.insert(0, cover_chunk_path)
-
-        # 只有一个块且无需滤镜时直接重命名，无需 concat
-        hook_filter = _build_drawtext_filter(hook_config) if (hook_config and hook_config.enabled and hook_config.text) else None
-        if len(chunk_files) == 1 and not burn_subtitles and not hook_filter:
-            import shutil
-            shutil.move(str(chunk_files[0]), output_path)
-            if log_callback:
-                await log_callback("success", "ffmpeg", f"导出完成（单块，无需拼接）: {output_path}")
-            return True
-
-        concat_file = temp_dir / "concat.txt"
-        with open(concat_file, "w", encoding="utf-8") as f:
-            for cp in chunk_files:
-                f.write(f"file '{cp}'\n")
-
+        if task_id and task_id in _cancelled_exports:
+            return False
+        os.replace(output_part, output_target)
         if log_callback:
-            await log_callback("info", "ffmpeg", f"正在拼接 {len(chunk_files)} 个块...")
-
-        if burn_subtitles and srt_path and os.path.exists(srt_path):
-            # ffmpeg subtitles filter on Windows cannot handle non-ASCII or backslash paths.
-            # Copy SRT to temp dir (guaranteed ASCII short path) before building the filter.
-            import shutil as _shutil
-            safe_srt = str(temp_dir / "sub.srt")
-            _shutil.copy2(srt_path, safe_srt)
-            escaped_srt = safe_srt.replace("\\", "/").replace(":", "\\:")
-            vf_filter = f"subtitles='{escaped_srt}'"
-            if subtitle_style:
-                _vinfo = get_video_info(video_path)
-                _w, _h = _vinfo.get("width", 0), _vinfo.get("height", 0)
-                force_style = _build_force_style(subtitle_style, video_width=_w, video_height=_h)
-                vf_filter = f"subtitles='{escaped_srt}':force_style='{force_style}'"
-            if hook_filter:
-                vf_filter = f"{vf_filter},{hook_filter}"
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-vf", vf_filter,
-                "-c:v", "libx264",
-                "-preset", "medium",
-                "-crf", "18",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                output_path,
-            ]
-            if log_callback:
-                style_note = "（自定义样式）" if subtitle_style else ""
-                hook_note = " + Hook" if hook_filter else ""
-                await log_callback("info", "ffmpeg", f"硬字幕烧录模式{style_note}{hook_note}：concat + subtitles 滤镜（重编码）")
-        elif hook_filter:
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-vf", hook_filter,
-                "-c:v", "libx264",
-                "-preset", "medium",
-                "-crf", "18",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                output_path,
-            ]
-            if log_callback:
-                await log_callback("info", "ffmpeg", "Hook 字幕模式：concat + drawtext 滤镜（重编码）")
-        elif cover_chunk_path and cover_chunk_path.exists():
-            # 有封面时强制重编码，确保帧率/参数一致
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "18",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                output_path,
-            ]
-            if log_callback:
-                await log_callback("info", "ffmpeg", "封面拼接模式（重编码）")
-        else:
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-c", "copy",
-                output_path,
-            ]
-
-        loop = asyncio.get_event_loop()
-        success, output = await loop.run_in_executor(
-            None, functools.partial(_run_ffmpeg, cmd, task_id=task_id)
-        )
-
-        if success:
-            if log_callback:
-                await log_callback("success", "ffmpeg", f"导出完成: {output_path}")
-            return True
-        else:
-            if log_callback:
-                await log_callback("error", "ffmpeg", f"拼接失败: {output[:2000]}")
-            return False
+            await log_callback("success", "ffmpeg", f"导出完成: {output_path}")
+        return True
 
     finally:
-        import shutil
+        output_part.unlink(missing_ok=True)
+        if task_id:
+            unregister_process(task_id)
+            _cleanup_registered_parts(task_id)
+            with _process_lock:
+                _cancelled_exports.discard(task_id)
+        with _output_claims_lock:
+            _output_claims.discard(output_claim)
         try:
             shutil.rmtree(temp_dir)
-        except:
+        except OSError:
             pass
 
 
@@ -876,18 +1063,12 @@ async def export_ffmpeg_multi_clips(
     base_name: str,
     log_callback: Optional[Callable] = None,
     task_id: Optional[str] = None,
-    burn_subtitles: bool = False,
-    params: Optional[TaskParams] = None,
-    subtitle_style: Optional[SubtitleStyle] = None,
-    hook_configs: Optional[List[Optional[HookConfig]]] = None,
-    hook_orders: Optional[List[Optional[List[str]]]] = None,
 ) -> List[str]:
     """
     导出多个独立 clip 文件。
 
     为避免污染 task.audit_segments 中的原始状态，这里会为每组片段创建深拷贝，
     并将导出副本统一标记为 KEEP 后再复用 export_ffmpeg_lossless。
-    burn_subtitles=True 时，为每个 clip 单独生成 SRT 并烧录字幕。
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     output_paths: List[str] = []
@@ -896,8 +1077,6 @@ async def export_ffmpeg_multi_clips(
         if not clip_segments:
             continue
 
-        hook_config = (hook_configs[i - 1] if hook_configs and i - 1 < len(hook_configs) else None)
-        hook_order = (hook_orders[i - 1] if hook_orders and i - 1 < len(hook_orders) else None)
         clip_name = f"{base_name}_clip_{i:02d}"
         output_path = str(Path(output_dir) / f"{clip_name}.mp4")
         export_segments = [
@@ -917,36 +1096,12 @@ async def export_ffmpeg_multi_clips(
                 f"导出片段 {i}/{len(clip_groups)}: {len(clip_segments)} 段, {total_duration:.1f}s → {clip_name}.mp4",
             )
 
-        # 字幕烧录：为本 clip 生成单独的 SRT
-        srt_path: Optional[str] = None
-        if burn_subtitles:
-            srt_path = str(Path(output_dir) / f"{clip_name}.srt")
-            try:
-                generate_srt(
-                    segments=export_segments,
-                    srt_path=srt_path,
-                    params=params,
-                    subtitle_style=subtitle_style,
-                    golden_quote_order=hook_order,
-                )
-                if log_callback:
-                    await log_callback("info", "ffmpeg", f"SRT 字幕已生成: {clip_name}.srt")
-            except Exception as e:
-                if log_callback:
-                    await log_callback("warn", "ffmpeg", f"SRT 生成失败，跳过字幕烧录: {e}")
-                srt_path = None
-
         success = await export_ffmpeg_lossless(
             video_path=video_path,
             segments=export_segments,
             output_path=output_path,
             log_callback=log_callback,
             task_id=task_id,
-            burn_subtitles=burn_subtitles and srt_path is not None,
-            srt_path=srt_path,
-            subtitle_style=subtitle_style,
-            hook_config=hook_config,
-            golden_quote_order=hook_order,
         )
         if success:
             output_paths.append(output_path)
@@ -990,10 +1145,15 @@ def get_video_info(video_path: str) -> dict:
     return {}
 
 
+@functools.lru_cache(maxsize=1)
 def check_ffmpeg_available() -> bool:
-    """Check if FFmpeg is installed."""
-    result = subprocess.run(
-        ["ffmpeg", "-version"],
-        capture_output=True
-    )
+    """检查一次并缓存结果，避免每次健康探测都同步启动 FFmpeg。"""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-version"],
+            capture_output=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "validation_contract.schema.json",
+  "title": "ValidationContract",
+  "type": "object",
+  "required": ["contract_id", "mission_id", "definition_of_done", "assertions"],
+  "properties": {
+    "contract_id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "definition_of_done": { "type": "string" },
+    "assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assertion_id", "description", "required"],
+        "properties": {
+          "assertion_id": { "type": "string" },
+          "description": { "type": "string" },
+          "required": { "type": "boolean" },
+          "validation_method": { "type": "string", "enum": ["rule", "test", "validator_agent", "human_review"] },
+          "validator": { "type": "string" },
+          "pass_condition": { "type": "string" }
+        }
+      }
+    },
+    "failure_policy": {
+      "type": "object",
+      "properties": {
+        "on_failed_required_assertion": { "type": "string", "enum": ["block", "retry", "escalate_to_human"] },
+        "on_failed_optional_assertion": { "type": "string", "enum": ["warn", "retry", "ignore"] },
+        "max_retry": { "type": "integer", "default": 2 }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "semantic_audit_agent",
+  "version": "1.0.0",
+  "agent_type": "execution",
+  "capabilities": ["audit.segments"],
+  "input_schema": "goldenclip.audit_input@1",
+  "output_schema": "goldenclip.audit_decisions@1",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#3-worker-agent",
+    "domain_overlay": "domains/goldenclip/overlays/semantic_audit.md",
+    "comment": "运行时实际拼装 = 基座 + Worker 角色层 + 场景 prompt（backend/prompts/{task_type}.md，经 read_scenario_prompt 注入）+ 本 overlay"
+  },
+  "allowed_tools": ["read_asr_result", "read_scenario_prompt", "read_style_memory"],
+  "model_profile": {
+    "preferred": "audit_llm",
+    "fallback": ["rule_engine"],
+    "temperature": 0.0,
+    "comment": "rule_engine 对应 semantic_auditor.py 的规则 fallback，模型不可用时降级"
+  },
+  "risk_class": "produce_internal",
+  "independence_requirements": [],
+  "overrides": { "timeout_seconds": 300, "max_retries": 2 },
+  "enabled": true
+}

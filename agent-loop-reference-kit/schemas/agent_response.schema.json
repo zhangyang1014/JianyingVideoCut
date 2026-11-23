@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent_response.schema.json",
+  "title": "AgentResponse",
+  "type": "object",
+  "required": ["message_id", "mission_id", "from_agent", "status"],
+  "properties": {
+    "message_id": { "type": "string" },
+    "reply_to": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "task_id": { "type": ["string", "null"] },
+    "from_agent": { "type": "string" },
+    "to_agent": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed", "blocked", "needs_more_info", "rejected"]
+    },
+    "result": { "type": "object" },
+    "evidence": { "type": "array", "items": { "type": "object" } },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "uncertainties": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "object" } },
+    "next_steps": { "type": "array", "items": { "type": "string" } },
+    "handoff_required": { "type": "boolean", "default": true },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

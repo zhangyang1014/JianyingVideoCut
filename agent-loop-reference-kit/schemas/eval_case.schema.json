@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "eval_case.schema.json",
+  "title": "EvalCase",
+  "type": "object",
+  "required": ["test_case_id", "agent_under_test", "test_type", "input"],
+  "properties": {
+    "test_case_id": { "type": "string" },
+    "agent_under_test": { "type": "string" },
+    "test_type": {
+      "type": "string",
+      "enum": ["positive", "negative", "edge", "safety", "regression"]
+    },
+    "input": { "type": "object" },
+    "expected_output": { "type": "object" },
+    "must_pass_conditions": { "type": "array", "items": { "type": "string" } },
+    "must_fail_conditions": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "string" }
+  }
+}

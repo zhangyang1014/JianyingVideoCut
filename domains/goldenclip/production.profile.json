@@ -1,0 +1,27 @@
+{
+  "domain_id": "goldenclip.production",
+  "version": "1.0.0",
+  "scope": "ProductionProject only; existing Task review rules are unchanged",
+  "business_goal": "品牌资料、分镜、实拍与外部 AIGC 素材在同一个制作项目中持续积累，并从确定的时间线交付 MP4、字幕与剪映草稿",
+  "entrypoint": "backend/routers/productions.py",
+  "agent": "agents/production_planner_agent.json",
+  "constraints": [
+    "模型只使用现有 AI 配置中的 provider；凭据不进入项目、快照或提示词",
+    "视觉分析仅发送页面预览、参考图及低分辨率抽帧；原始视频留在本地",
+    "提示词、复制内容、分镜和实际渲染快照均来自项目记录",
+    "商品事实须引用已登记的来源；本次价格和活动不随品牌资料复用",
+    "数字人口播 AI 规划按 creator_styles/active.json 读取对应主播的风格卡与证据索引，按题材、主问题、时长选规则；方向保存完整 style_snapshot。reported/candidate 不视为本地已验证，字幕不用于推断音视频风格。普通卖货视频与原稿转分镜不注入 Lina 风格。",
+    "数字人口播稿经 PUT /{project_id}/narration 保存。POST /{project_id}/narration/storyboard 按原稿生成候选，POST /{project_id}/narration/storyboard/apply 确认应用。所有路径以 /api/productions 为前缀。",
+    "实际媒体时长和音频字幕决定最终时间线；模型不能生成源区间",
+    "一键剪辑点击即为当前方案和素材版本的成片请求；不触发旧 Task 的重复 review",
+    "结构校验不等于剪映应用打开验收；未通过媒体检查的产物不可下载"
+  ],
+  "tools": {
+    "production_plan": "backend.services.production_planner.plan_with_ai",
+    "production_narration_storyboard": "backend.services.production_planner.storyboard_from_narration",
+    "production_asset_inspect": "backend.routers.productions._analyze_one",
+    "production_compile": "backend.services.production_timeline.compile_timeline",
+    "production_render": "backend.services.production_renderer.render_production"
+  },
+  "validation_contract": "contracts/production.contract.json"
+}

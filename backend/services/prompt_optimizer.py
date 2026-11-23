@@ -1,24 +1,36 @@
 """
 GoldenClip PromptOptimizer
-根据用户对 Claude 审计结果的二次修改，生成提示词改进建议。
+根据用户对 AI 审计结果的二次修改，生成提示词改进建议。
 
 流程：
-  1. 收集 claude_action != action 的片段（用户修改）
+  1. 收集 user_override 且 claude_action != action 的片段（用户主动修改）
   2. 按修改方向分组（误删 / 漏删 / 其他）
   3. 构造反馈 Prompt，包含当前场景提示词全文 + 修改清单
-  4. 调 Claude 生成规则改进建议
+  4. 调 OpenAI 生成规则改进建议
 """
 
+import asyncio
 import json
-import os
 import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+from ..core.task_runner import RetryableExecutionError, execute_with_retry
 from ..models.task import Segment, SegmentAction, Task, TaskType
+from ..models.app_config import DEFAULT_LEARNING_MODEL, ROUTERHUB_BASE_URL, ResolvedFeatureLlm
 from .semantic_auditor import load_system_prompt, SCENARIO_PROMPT_MAP
+from .app_config_store import resolve_openai_api_key
+from .llm_router import route_chat_completion
+from .learning_analyzer import apply_prompt_changes, save_versioned_prompt, activate_prompt_version
+from .semantic_auditor import (
+    MODEL_CACHE_DIR,
+    content_cache_fingerprint,
+    load_content_cache,
+    save_content_cache,
+)
 
 USER_STYLE_PATH = Path(__file__).parent.parent / "data" / "user_style.md"
+PROMPT_FEEDBACK_CACHE_DIR = MODEL_CACHE_DIR / "prompt_feedback"
 
 # 动作的中文显示名
 ACTION_LABELS: Dict[str, str] = {
@@ -33,14 +45,14 @@ ACTION_LABELS: Dict[str, str] = {
 
 def collect_corrections(segments: List[Segment]) -> Dict[str, Any]:
     """
-    收集用户修改统计：对比 claude_action 与当前 action。
+    收集用户主动修改统计：必须是 user_override，且当前 action 与 AI 原始 action 不同。
     返回结构：
     {
         "total_modified": int,
         "delete_to_keep": [...],    # Claude 误删 → 用户恢复
         "keep_to_delete": [...],    # Claude 漏删 → 用户删除
         "other_changes": [...],     # 其他类型变更
-        "unchanged": int,
+        "unchanged": int,           # 仅供兼容旧前端/调试，不参与学习 prompt
     }
     """
     delete_to_keep: List[Dict[str, Any]] = []
@@ -50,6 +62,9 @@ def collect_corrections(segments: List[Segment]) -> Dict[str, Any]:
 
     for seg in segments:
         if seg.claude_action is None:
+            continue
+
+        if not seg.user_override:
             continue
 
         if seg.action == seg.claude_action:
@@ -92,11 +107,11 @@ def _build_feedback_prompt(
     task_type: str,
     user_notes: str = "",
 ) -> str:
-    """构造提交给 Claude 的反馈分析 Prompt。"""
+    """构造提交给 OpenAI 的反馈分析 Prompt。"""
     scenario_labels = {
         "monologue_clean": "口播精修",
-        "interview_compress": "访谈压缩",
-        "highlight_reel": "精彩集锦",
+        "interview_compress": "直播访谈压缩",
+        "highlight_reel": "直播卖货集锦",
     }
     scenario_name = scenario_labels.get(task_type, task_type)
 
@@ -169,15 +184,19 @@ def _build_feedback_prompt(
 {current_prompt}
 ```
 
-## 用户修正记录
+## 用户主动修正记录
 
-共 {corrections["total_modified"]} 处修改（{corrections["unchanged"]} 处未改动）
+以下只包含编导主动调整过的片段，共 {corrections["total_modified"]} 处。未改动片段已排除，不作为本次学习依据。
 
 {corrections_text}
 {user_notes_section}
 ## 输出要求
 
-请按以下格式输出，包含两个部分：
+请按以下格式输出，包含三个部分：
+
+### 第零部分：本次更新点
+
+用 2-5 条短句先列出本次真正会改动的规则更新点。每条只讲变化，不复述完整规则。
 
 ### 第一部分：提示词规则改进建议
 
@@ -190,7 +209,7 @@ def _build_feedback_prompt(
 
 ### 第二部分：个人剪辑风格档案更新
 
-请在最末尾输出一个 JSON 代码块（用 ```json 包裹），描述该用户的个人剪辑偏好：
+请描述该用户的个人剪辑偏好：
 ```json
 {{
   "语气词偏好": "根据修正总结用户对语气词的态度，例如：保留'嗯'开头的思考停顿，删除'然后'...",
@@ -199,11 +218,50 @@ def _build_feedback_prompt(
 }}
 ```
 
+### 第三部分：结构化写入数据
+
+请在全文最后额外输出一个 JSON 代码块（用 ```json 包裹），供系统自动写入提示词和风格档案。格式必须严格如下：
+```json
+{{
+  "updates": [
+    {{
+      "target_rule": "H2",
+      "change_type": "modify",
+      "summary": "将短片段删除规则改成带悬念和情绪价值豁免"
+    }}
+  ],
+  "prompt_changes": {{
+    "changes": [
+      {{
+        "type": "modify",
+        "rule_id": "H2",
+        "summary": "将短片段删除规则改成带悬念和情绪价值豁免",
+        "full_rule_text": "### 【H2】规则名 ★★★\\n完整的新规则块，必须从三级标题开始，包含该规则全部内容"
+      }},
+      {{
+        "type": "add",
+        "rule_id": "H5",
+        "insert_after": "H2",
+        "summary": "新增真实感与口语瑕疵豁免",
+        "full_rule_text": "### 【H5】规则名 ★★★\\n完整的新规则块，必须从三级标题开始，包含该规则全部内容"
+      }}
+    ]
+  }},
+  "style_update": {{
+    "语气词偏好": "根据修正总结用户对语气词的态度",
+    "停顿与节奏偏好": "根据修正总结用户对停顿的态度",
+    "内容保留倾向": "根据修正总结用户的内容取舍偏好"
+  }}
+}}
+```
+
 注意：
 - 只针对用户修正中明确暴露的问题提建议，不要臆测
 - 建议应具体可执行，不要泛泛而谈
+- `prompt_changes.changes[*].full_rule_text` 必须是可直接替换或新增到审计提示词中的完整规则块，不要只写差异片段
+- `type=modify` 时 `rule_id` 必须对应当前提示词中已有的规则编号；`type=add` 时必须提供 `insert_after`
 - 保持规则的格式一致性（### 【编号】规则名 ★★★）
-- 风格档案 JSON 仅输出能从本次修正中确定的偏好，不确定的项写"暂无足够数据"
+- `style_update` 仅输出能从本次修正中确定的偏好，不确定的项写"暂无足够数据"
 - 用中文输出
 """
 
@@ -211,8 +269,9 @@ def _build_feedback_prompt(
 async def generate_prompt_improvement(
     task: Task,
     api_key: Optional[str] = None,
-    model: str = "anthropic/claude-3.5-sonnet",
+    model: str = DEFAULT_LEARNING_MODEL,
     user_notes: str = "",
+    base_url: str = ROUTERHUB_BASE_URL,
 ) -> Dict[str, Any]:
     """
     根据用户修正生成提示词改进建议。
@@ -220,7 +279,7 @@ async def generate_prompt_improvement(
     返回：
     {
         "corrections": {...},      # 修正统计
-        "suggestion": str,         # Claude 返回的改进建议（Markdown）
+        "suggestion": str,         # OpenAI 返回的改进建议（Markdown）
         "scenario": str,           # 场景类型
     }
     """
@@ -233,96 +292,215 @@ async def generate_prompt_improvement(
             "corrections": corrections,
             "suggestion": "没有发现用户修改，无需优化提示词。",
             "scenario": task_type,
+            "update_points": [],
+            "prompt_changes": {"changes": []},
         }
 
     current_prompt = load_system_prompt(task_type)
     feedback_prompt = _build_feedback_prompt(corrections, current_prompt, task_type, user_notes)
 
-    key = (
-        api_key
-        or os.environ.get("OPENROUTER_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("CLAUDE_API_KEY")
-    )
+    key = resolve_openai_api_key(api_key)
 
     if not key:
-        raise ValueError("未配置 API Key，无法调用 Claude 生成改进建议")
-
-    use_openrouter = key.startswith("sk-or-") or bool(os.environ.get("OPENROUTER_API_KEY"))
+        raise ValueError("未配置 OpenAI API Key，无法生成改进建议")
 
     try:
-        response_text = None
+        system_prompt = "你是一名资深的视频编导 AI 提示词优化专家。根据用户反馈改进审计提示词。"
+        resolved_model = model or DEFAULT_LEARNING_MODEL
+        cache_key = content_cache_fingerprint(
+            "prompt_feedback:v1",
+            {
+                "model": resolved_model,
+                "endpoint": base_url.rstrip("/"),
+                "system_prompt": system_prompt,
+                "input": feedback_prompt,
+            },
+        )
+        response_text = load_content_cache(PROMPT_FEEDBACK_CACHE_DIR, cache_key)
+        if not isinstance(response_text, str):
+            def _validate_feedback(content: str) -> str:
+                if not content.strip():
+                    raise ValueError("提示词反馈模型返回空内容")
+                parsed = extract_feedback_structure(content)
+                changes = parsed.get("prompt_changes", {}).get("changes", [])
+                if not parsed.get("update_points") and not changes:
+                    raise ValueError("提示词反馈模型缺少结构化改进项")
+                return content
 
-        if use_openrouter:
-            import openai
-
-            _model_map = {
-                "claude-3-7-sonnet-20250219": "anthropic/claude-3.7-sonnet",
-                "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
-                "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
-            }
-            or_model = _model_map.get(model, model if "/" in model else f"anthropic/{model}")
-
-            client = openai.OpenAI(
-                api_key=key,
-                base_url="https://openrouter.ai/api/v1",
-                default_headers={
-                    "HTTP-Referer": "https://github.com/zhangyang1014/JianyingVideoCut",
-                    "X-Title": "GoldenClip Prompt Optimizer",
-                },
-            )
-
-            completion = client.chat.completions.create(
-                model=or_model,
-                max_tokens=4096,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "你是一名资深的视频编导 AI 提示词优化专家。根据用户反馈改进审计提示词。",
-                    },
+            routed = await route_chat_completion(
+                "prompt_feedback.optimize",
+                [
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": feedback_prompt},
                 ],
-            )
-            response_text = completion.choices[0].message.content
-
-        else:
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=key)
-            message = client.messages.create(
-                model=model if "/" not in model else "claude-3-5-sonnet-20241022",
                 max_tokens=4096,
-                system="你是一名资深的视频编导 AI 提示词优化专家。根据用户反馈改进审计提示词。",
-                messages=[{"role": "user", "content": feedback_prompt}],
+                temperature=0.2,
+                validate=_validate_feedback,
+                override=ResolvedFeatureLlm(
+                    feature="learning",
+                    mode="cloud",
+                    provider="openai_compatible",
+                    model=resolved_model,
+                    base_url=base_url.rstrip("/"),
+                    api_key=key,
+                ),
+                timeout_seconds=60,
             )
-            response_text = message.content[0].text
+            response_text = routed.content
+            try:
+                save_content_cache(PROMPT_FEEDBACK_CACHE_DIR, cache_key, response_text)
+            except OSError:
+                pass
 
-        # 从响应中提取风格档案 JSON
-        style_update = _extract_style_json(response_text or "")
+        structured = extract_feedback_structure(response_text or "")
 
         return {
             "corrections": corrections,
-            "suggestion": response_text or "Claude 未返回有效内容",
+            "suggestion": response_text or "OpenAI 未返回有效内容",
             "scenario": task_type,
-            "style_update": style_update,
+            "update_points": structured["update_points"],
+            "prompt_changes": structured["prompt_changes"],
+            "style_update": structured["style_update"],
         }
 
     except Exception as e:
-        raise ValueError(f"Claude API 调用失败: {str(e)}")
+        raise ValueError(f"OpenAI API 调用失败: {str(e)}")
+
+
+def _json_blocks(response_text: str) -> List[Dict[str, Any]]:
+    """提取响应中的 JSON 代码块；解析失败的代码块会被忽略。"""
+    blocks: List[Dict[str, Any]] = []
+    for match in re.finditer(r"```json\s*([\s\S]*?)\s*```", response_text, flags=re.IGNORECASE):
+        try:
+            data = json.loads(match.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict):
+            blocks.append(data)
+    return blocks
+
+
+def _normalize_update_points(raw: Any) -> List[Dict[str, str]]:
+    """把模型返回的更新点统一成前端可展示的短摘要结构。"""
+    if not isinstance(raw, list):
+        return []
+    points: List[Dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, str):
+            summary = item.strip()
+            if summary:
+                points.append({"summary": summary})
+            continue
+        if not isinstance(item, dict):
+            continue
+        summary = str(item.get("summary") or item.get("title") or item.get("text") or "").strip()
+        if not summary:
+            continue
+        point: Dict[str, str] = {"summary": summary}
+        for key in ("target_rule", "change_type", "title"):
+            value = item.get(key)
+            if value is not None and str(value).strip():
+                point[key] = str(value).strip()
+        points.append(point)
+    return points
+
+
+def _normalize_prompt_changes(raw: Any) -> Dict[str, List[Dict[str, str]]]:
+    """校验并规整可执行的规则变更，防止无效结构进入写入流程。"""
+    raw_changes = raw.get("changes") if isinstance(raw, dict) else raw
+    if not isinstance(raw_changes, list):
+        return {"changes": []}
+
+    changes: List[Dict[str, str]] = []
+    for item in raw_changes:
+        if not isinstance(item, dict):
+            continue
+        rule_id = str(item.get("rule_id") or "").strip()
+        full_rule_text = str(item.get("full_rule_text") or "").strip()
+        if not rule_id or not full_rule_text:
+            continue
+        change_type = str(item.get("type") or item.get("change_type") or "modify").strip()
+        if change_type not in {"modify", "add"}:
+            continue
+        change: Dict[str, str] = {
+            "type": change_type,
+            "rule_id": rule_id,
+            "full_rule_text": full_rule_text,
+        }
+        for key in ("insert_after", "summary"):
+            value = item.get(key)
+            if value is not None and str(value).strip():
+                change[key] = str(value).strip()
+        changes.append(change)
+    return {"changes": changes}
+
+
+def _looks_like_style_update(data: Dict[str, Any]) -> bool:
+    style_keys = {"语气词偏好", "停顿与节奏偏好", "停顿倾向", "内容保留倾向"}
+    return any(key in data for key in style_keys)
+
+
+def extract_feedback_structure(response_text: str) -> Dict[str, Any]:
+    """从 OpenAI 完整报告中提取更新点、规则变更和风格档案。"""
+    update_points: List[Dict[str, str]] = []
+    prompt_changes: Dict[str, List[Dict[str, str]]] = {"changes": []}
+    style_update: Optional[Dict[str, str]] = None
+
+    for block in _json_blocks(response_text):
+        if "updates" in block or "update_points" in block or "prompt_changes" in block:
+            update_points = _normalize_update_points(block.get("updates") or block.get("update_points"))
+            prompt_changes = _normalize_prompt_changes(block.get("prompt_changes"))
+            raw_style = block.get("style_update")
+            if isinstance(raw_style, dict):
+                style_update = {str(key): str(value) for key, value in raw_style.items()}
+        elif _looks_like_style_update(block):
+            style_update = {str(key): str(value) for key, value in block.items()}
+
+    if not update_points and prompt_changes["changes"]:
+        update_points = _normalize_update_points([
+            {
+                "target_rule": change.get("rule_id", ""),
+                "change_type": change.get("type", ""),
+                "summary": change.get("summary") or f"{change.get('type', 'modify')} {change.get('rule_id', '')}",
+            }
+            for change in prompt_changes["changes"]
+        ])
+
+    return {
+        "update_points": update_points,
+        "prompt_changes": prompt_changes,
+        "style_update": style_update,
+    }
 
 
 def _extract_style_json(response_text: str) -> Optional[Dict[str, str]]:
-    """从 Claude 响应中提取末尾的风格档案 JSON 代码块。"""
-    match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', response_text)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(1))
-        if isinstance(data, dict):
-            return data
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return None
+    """兼容旧调用：从 OpenAI 响应中提取风格档案 JSON。"""
+    return extract_feedback_structure(response_text)["style_update"]
+
+
+def apply_feedback_prompt_changes(task_type: str, prompt_changes: Dict[str, Any]) -> Dict[str, Any]:
+    """将结构化规则变更合并到当前生效提示词，并激活为新版本。"""
+    normalized = _normalize_prompt_changes(prompt_changes)
+    if not normalized["changes"]:
+        raise ValueError("没有可写入的规则变更")
+
+    current_prompt = load_system_prompt(task_type)
+    new_prompt = apply_prompt_changes(
+        current_prompt,
+        json.dumps(normalized, ensure_ascii=False),
+    )
+    if new_prompt == current_prompt:
+        raise ValueError("规则变更未匹配到当前提示词，请检查规则编号和完整规则块")
+
+    filepath, version = save_versioned_prompt(task_type, new_prompt)
+    activate_prompt_version(task_type, filepath)
+    return {
+        "success": True,
+        "version": version,
+        "path": filepath,
+        "changes_applied": len(normalized["changes"]),
+        "content": new_prompt,
+    }
 
 
 def merge_user_style(style_update: Dict[str, str]) -> str:

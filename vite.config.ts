@@ -168,9 +168,20 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port: 5173,
-    strictPort: false, // Will find next available port if 5173 is busy
+    port: 5177,
+    strictPort: true, // 避免旧实例占用时静默漂移到 5178
     host: true,
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+      "/ws": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        ws: true,
+      },
+    },
     allowedHosts: [
       ".manuspre.computer",
       ".manus.computer",

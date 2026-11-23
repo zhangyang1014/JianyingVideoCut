@@ -13,13 +13,62 @@ Note: pyJianYingDraft supports JianYing 5+ for draft generation.
 import os
 import json
 import re as _re
-from typing import List, Optional, Callable, Dict
+import shutil
+import threading
+import uuid
+from typing import List, Optional, Callable
 from pathlib import Path
 from datetime import datetime
 
 from ..models.task import Segment, SegmentAction, TaskParams
+from .subtitle_text import get_effective_subtitle_text
 
 EXPORTS_DIR = Path(__file__).parent.parent.parent / "exports"
+_draft_claims: set[str] = set()
+_draft_claims_lock = threading.Lock()
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(f"{path.name}.part")
+    with open(part, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(part, path)
+
+
+def _validate_staged_draft(staged_dir: Path) -> None:
+    if not staged_dir.is_dir():
+        raise RuntimeError("剪映草稿 staging 目录不存在")
+    json_files = list(staged_dir.rglob("*.json"))
+    if not json_files:
+        raise RuntimeError("剪映草稿未生成 JSON 文件")
+    for json_path in json_files:
+        if json_path.stat().st_size <= 0:
+            raise RuntimeError(f"剪映草稿文件为空: {json_path.name}")
+        with open(json_path, "r", encoding="utf-8") as handle:
+            json.load(handle)
+
+
+def _publish_staged_directory(staged_dir: Path, final_dir: Path) -> None:
+    """同文件系统 rename 发布；同名旧目录先整体移走，绝不混写内容。"""
+    backup_dir = final_dir.with_name(f".{final_dir.name}.backup-{uuid.uuid4().hex}")
+    moved_old = False
+    published = False
+    try:
+        if final_dir.exists():
+            os.rename(final_dir, backup_dir)
+            moved_old = True
+        os.rename(staged_dir, final_dir)
+        published = True
+    except Exception:
+        if moved_old and backup_dir.exists() and not final_dir.exists():
+            os.rename(backup_dir, final_dir)
+        raise
+    finally:
+        if published and backup_dir.exists():
+            shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def _get_subtitle_text(seg: Segment, params: Optional[TaskParams] = None) -> str:
@@ -28,12 +77,7 @@ def _get_subtitle_text(seg: Segment, params: Optional[TaskParams] = None) -> str
     1. subtitle_fix / text_fix：使用 display_text（修正后文本）
     2. show_speaker_label=True：在文本前追加 [说话人] 前缀
     """
-    text = (seg.display_text or seg.text or "").strip()
-    if params and params.show_speaker_label and seg.speaker:
-        speaker_names: Dict[str, str] = params.speaker_names or {}
-        label = speaker_names.get(seg.speaker, seg.speaker)
-        text = f"[{label}] {text}"
-    return text
+    return get_effective_subtitle_text(seg, params)
 
 
 def _find_line_break_time(seg: Segment) -> Optional[float]:
@@ -89,120 +133,142 @@ async def build_jianying_draft(
     if log_callback:
         await log_callback("info", "jianying", f"开始生成剪映草稿: {draft_name}")
 
+    final_root = Path(draft_folder) if draft_folder and Path(draft_folder).is_dir() else EXPORTS_DIR
+    final_root.mkdir(parents=True, exist_ok=True)
+    final_dir = final_root / draft_name
+    draft_claim = str(final_dir.resolve())
+    with _draft_claims_lock:
+        claim_conflict = draft_claim in _draft_claims
+        if not claim_conflict:
+            _draft_claims.add(draft_claim)
+    if claim_conflict:
+        if log_callback:
+            await log_callback("error", "jianying", "相同剪映草稿目标正在构建，拒绝并发覆盖")
+        return None
+    staging_root = final_root / f".{draft_name}.staging-{uuid.uuid4().hex}"
+    staged_dir = staging_root / draft_name
+
     try:
-        import pyJianYingDraft as draft
-        from pyJianYingDraft import trange, SEC
+        staging_root.mkdir(parents=True, exist_ok=False)
+        try:
+            import pyJianYingDraft as draft
 
-        # Determine draft folder
-        if draft_folder and os.path.exists(draft_folder):
-            draft_dir = draft.DraftFolder(draft_folder)
-            script = draft_dir.create_draft(draft_name, 1920, 1080)
-        else:
-            # Create in exports directory
-            EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            output_dir = EXPORTS_DIR / draft_name
-            output_dir.mkdir(parents=True, exist_ok=True)
-            script = draft.ScriptFile.create(1920, 1080)
+            if draft_folder and Path(draft_folder).is_dir():
+                draft_dir = draft.DraftFolder(str(staging_root))
+                script = draft_dir.create_draft(draft_name, 1920, 1080)
+            else:
+                staged_dir.mkdir(parents=True, exist_ok=False)
+                script = draft.ScriptFile.create(1920, 1080)
 
-        # Add main video track
-        script.add_track(draft.TrackType.video, "main")
-
-        # Calculate cumulative timeline position
-        # Target_Start_n = Σ Duration_i (i=1 to n-1)
-        timeline_cursor = 0  # microseconds
-
-        if log_callback:
-            await log_callback("info", "jianying", f"正在添加 {len(kept_segments)} 个片段到时间轴...")
-
-        for i, seg in enumerate(kept_segments):
-            duration_sec = seg.end - seg.start
-            duration_us = int(duration_sec * 1_000_000)  # Convert to microseconds
-
+            script.add_track(draft.TrackType.video, "main")
+            timeline_cursor = 0
             if log_callback:
-                progress = (i + 1) / len(kept_segments)
-                await log_callback(
-                    "info", "jianying",
-                    f"添加片段 {i+1}/{len(kept_segments)}: {seg.start:.2f}s → {seg.end:.2f}s",
-                    progress
-                )
+                await log_callback("info", "jianying", f"正在添加 {len(kept_segments)} 个片段到时间轴...")
 
-            # Create video segment
-            # target_timerange: where it sits on the timeline
-            # source_timerange: which part of the source video to use
-            video_seg = draft.VideoSegment(
-                video_path,
-                target_timerange=draft.Timerange(timeline_cursor, duration_us),
-                source_timerange=draft.Timerange(
-                    int(seg.start * 1_000_000),
-                    duration_us
+            for i, seg in enumerate(kept_segments):
+                duration_us = int((seg.end - seg.start) * 1_000_000)
+                if log_callback:
+                    await log_callback(
+                        "info", "jianying",
+                        f"添加片段 {i+1}/{len(kept_segments)}: {seg.start:.2f}s → {seg.end:.2f}s",
+                        (i + 1) / len(kept_segments),
+                    )
+                video_seg = draft.VideoSegment(
+                    video_path,
+                    target_timerange=draft.Timerange(timeline_cursor, duration_us),
+                    source_timerange=draft.Timerange(int(seg.start * 1_000_000), duration_us),
                 )
+                script.add_segment(video_seg, "main")
+
+                subtitle_text = _get_subtitle_text(seg, params)
+                if subtitle_text:
+                    try:
+                        line_break_time = _find_line_break_time(seg)
+                        if line_break_time is not None and seg.start < line_break_time < seg.end:
+                            lb_offset_us = int((line_break_time - seg.start) * 1_000_000)
+                            text_part1, text_part2 = _split_text_at_break(seg, line_break_time)
+                            script.add_track(draft.TrackType.text, f"subtitle_{i}_a")
+                            script.add_segment(
+                                draft.TextSegment(
+                                    text_part1 or subtitle_text,
+                                    target_timerange=draft.Timerange(timeline_cursor, lb_offset_us),
+                                ),
+                                f"subtitle_{i}_a",
+                            )
+                            script.add_track(draft.TrackType.text, f"subtitle_{i}_b")
+                            script.add_segment(
+                                draft.TextSegment(
+                                    text_part2 or "",
+                                    target_timerange=draft.Timerange(
+                                        timeline_cursor + lb_offset_us,
+                                        duration_us - lb_offset_us,
+                                    ),
+                                ),
+                                f"subtitle_{i}_b",
+                            )
+                        else:
+                            script.add_track(draft.TrackType.text, f"subtitle_{i}")
+                            script.add_segment(
+                                draft.TextSegment(
+                                    subtitle_text,
+                                    target_timerange=draft.Timerange(timeline_cursor, duration_us),
+                                ),
+                                f"subtitle_{i}",
+                            )
+                    except Exception:
+                        pass
+                timeline_cursor += duration_us
+
+            if draft_folder and Path(draft_folder).is_dir():
+                script.save()
+            else:
+                script.dump(str(staged_dir / "draft_content.json"))
+            _write_json_atomic(
+                staged_dir / "goldenclip_build.json",
+                {"builder": "pyJianYingDraft", "completed_at": datetime.now().isoformat()},
             )
-
-            script.add_segment(video_seg, "main")
-
-            # 计算最终字幕文本（含 display_text 覆盖 + 说话人标签）
-            subtitle_text = _get_subtitle_text(seg, params)
-            if subtitle_text:
-                try:
-                    # 超长字幕分行：检查 subtitle_line_break，生成两张字幕卡
-                    line_break_time = _find_line_break_time(seg)
-                    if line_break_time is not None and seg.start < line_break_time < seg.end:
-                        # 第一张字幕卡：seg.start → line_break_time
-                        lb_offset_us = int((line_break_time - seg.start) * 1_000_000)
-                        remaining_us = duration_us - lb_offset_us
-                        # 切分字幕文本（按 words 分割）
-                        text_part1, text_part2 = _split_text_at_break(seg, line_break_time)
-                        script.add_track(draft.TrackType.text, f"subtitle_{i}_a")
-                        script.add_segment(
-                            draft.TextSegment(
-                                text_part1 or subtitle_text,
-                                target_timerange=draft.Timerange(timeline_cursor, lb_offset_us),
-                            ),
-                            f"subtitle_{i}_a"
-                        )
-                        # 第二张字幕卡：line_break_time → seg.end
-                        script.add_track(draft.TrackType.text, f"subtitle_{i}_b")
-                        script.add_segment(
-                            draft.TextSegment(
-                                text_part2 or "",
-                                target_timerange=draft.Timerange(timeline_cursor + lb_offset_us, remaining_us),
-                            ),
-                            f"subtitle_{i}_b"
-                        )
-                    else:
-                        script.add_track(draft.TrackType.text, f"subtitle_{i}")
-                        text_seg = draft.TextSegment(
-                            subtitle_text,
-                            target_timerange=draft.Timerange(timeline_cursor, duration_us),
-                        )
-                        script.add_segment(text_seg, f"subtitle_{i}")
-                except Exception:
-                    pass  # 字幕是可选的，失败不阻断导出
-
-            # Advance timeline cursor
-            timeline_cursor += duration_us
-
-        # Save draft
-        if draft_folder and os.path.exists(draft_folder):
-            script.save()
-            draft_path = os.path.join(draft_folder, draft_name)
-        else:
-            draft_path = str(EXPORTS_DIR / draft_name / "draft_content.json")
-            script.dump(draft_path)
-
+            _validate_staged_draft(staged_dir)
+            _publish_staged_directory(staged_dir, final_dir)
+            draft_path = str(final_dir if draft_folder else final_dir / "draft_content.json")
+            if log_callback:
+                await log_callback("success", "jianying", f"pyJianYingDraft 草稿原子发布成功: {draft_path}")
+            return draft_path
+        except Exception as py_error:
+            shutil.rmtree(staging_root, ignore_errors=True)
+            staging_root.mkdir(parents=True, exist_ok=False)
+            staged_dir.mkdir(parents=True, exist_ok=False)
+            if log_callback:
+                await log_callback(
+                    "warn",
+                    "jianying",
+                    f"pyJianYingDraft 构建未完成，改用 fallback JSON: {py_error}",
+                )
+            audit_path = await _build_json_draft(
+                video_path,
+                kept_segments,
+                draft_name,
+                log_callback,
+                params,
+                output_dir=staged_dir,
+            )
+            _write_json_atomic(
+                staged_dir / "goldenclip_build.json",
+                {"builder": "fallback_json", "completed_at": datetime.now().isoformat()},
+            )
+            _validate_staged_draft(staged_dir)
+            _publish_staged_directory(staged_dir, final_dir)
+            final_audit_path = final_dir / Path(audit_path).name
+            if log_callback:
+                await log_callback("success", "jianying", f"fallback JSON 草稿原子发布成功: {final_audit_path}")
+            return str(final_audit_path)
+    except Exception as error:
         if log_callback:
-            await log_callback("success", "jianying", f"剪映草稿生成完成: {draft_path}")
-
-        return draft_path
-
-    except ImportError:
-        if log_callback:
-            await log_callback("warn", "jianying", "pyJianYingDraft 未安装，生成 JSON 草稿文件")
-        return await _build_json_draft(video_path, kept_segments, draft_name, log_callback, params)
-    except Exception as e:
-        if log_callback:
-            await log_callback("error", "jianying", f"剪映草稿生成失败: {str(e)}")
-        return await _build_json_draft(video_path, kept_segments, draft_name, log_callback, params)
+            await log_callback("error", "jianying", f"剪映草稿生成失败: {error}")
+        return None
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        with _draft_claims_lock:
+            _draft_claims.discard(draft_claim)
 
 
 def _split_text_at_break(seg: Segment, line_break_time: float):
@@ -234,13 +300,14 @@ async def _build_json_draft(
     draft_name: str,
     log_callback: Optional[Callable] = None,
     params: Optional[TaskParams] = None,
-) -> Optional[str]:
+    output_dir: Optional[Path] = None,
+) -> str:
     """
     Fallback: Build a JSON draft file compatible with pyJianYingDraft format.
     This can be manually imported or used with pyJianYingDraft later.
     """
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_dir = EXPORTS_DIR / draft_name
+    output_dir = output_dir or (EXPORTS_DIR / draft_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Build timeline with cumulative offsets
@@ -298,8 +365,7 @@ async def _build_json_draft(
 
     # Save audit JSON
     audit_path = output_dir / "goldenclip_draft.json"
-    with open(audit_path, "w", encoding="utf-8") as f:
-        json.dump(draft_data, f, ensure_ascii=False, indent=2)
+    _write_json_atomic(audit_path, draft_data)
 
     # Also save FFmpeg concat script
     concat_script = output_dir / "ffmpeg_concat.sh"
@@ -324,6 +390,6 @@ async def _build_json_draft(
         f.write(f'ffmpeg -y -f concat -safe 0 -i /tmp/goldenclip_concat.txt -c copy "{output_dir}/{draft_name}_output.mp4"\n')
 
     if log_callback:
-        await log_callback("success", "jianying", f"JSON 草稿已生成: {audit_path}")
+        await log_callback("info", "jianying", f"fallback JSON staging 已生成: {audit_path}")
 
     return str(audit_path)

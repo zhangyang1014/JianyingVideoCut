@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent_config.schema.json",
+  "title": "AgentConfig",
+  "type": "object",
+  "required": ["agent_id", "agent_name", "agent_type", "system_prompt"],
+  "properties": {
+    "agent_id": { "type": "string" },
+    "agent_name": { "type": "string" },
+    "agent_type": {
+      "type": "string",
+      "enum": [
+        "orchestrator", "planner", "worker", "researcher", "strategy",
+        "creator", "validator", "compliance_validator", "ux_validator",
+        "negotiator", "broadcaster", "memory_manager", "handoff_writer",
+        "tool_agent", "human_escalation", "evaluator"
+      ]
+    },
+    "description": { "type": "string" },
+    "system_prompt": { "type": "string" },
+    "allowed_tools": { "type": "array", "items": { "type": "string" } },
+    "allowed_message_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["delegation", "creator_verifier", "direct_communication", "negotiation", "broadcast", "handoff"]
+      }
+    },
+    "input_schema": { "type": "object" },
+    "output_schema": { "type": "object" },
+    "safety_rules": { "type": "array", "items": { "type": "string" } },
+    "failure_policy": {
+      "type": "object",
+      "properties": {
+        "max_retries": { "type": "integer", "default": 2 },
+        "on_schema_error": { "type": "string", "enum": ["retry", "escalate_to_human", "fail"] },
+        "on_tool_error": { "type": "string", "enum": ["retry", "fallback", "escalate_to_human"] },
+        "on_high_risk": { "type": "string", "enum": ["block_and_escalate"] }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "trace_required": { "type": "boolean", "default": true },
+        "handoff_required": { "type": "boolean", "default": true },
+        "store_messages": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}

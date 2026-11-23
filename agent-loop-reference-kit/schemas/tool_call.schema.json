@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tool_call.schema.json",
+  "title": "ToolCall",
+  "type": "object",
+  "required": ["tool_call_id", "mission_id", "agent", "tool_name", "status"],
+  "properties": {
+    "tool_call_id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "agent": { "type": "string" },
+    "tool_name": { "type": "string" },
+    "input": { "type": "object" },
+    "output": { "type": "object" },
+    "status": { "type": "string", "enum": ["success", "failed", "timeout", "blocked"] },
+    "error": { "type": ["string", "null"] },
+    "side_effect": { "type": "string", "enum": ["none", "read", "write", "external_action"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" }
+  }
+}

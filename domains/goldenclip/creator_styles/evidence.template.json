@@ -1,0 +1,40 @@
+{
+  "creator_id": "replace_creator",
+  "version": "v1",
+  "method_version": "creator-style-analysis/v1",
+  "evidence_status": "candidate",
+  "source": {"kind": "local_analysis", "received_on": null, "url": null, "local_review": "模板，所有示例 ID 均须替换，未填写不代表已分析。"},
+  "batch": {
+    "id": "replace_batch", "platform": null, "account_id": null, "collected_until": null,
+    "raw_files": null, "matched_works": null, "selected_works": null, "independent_recordings": null,
+    "selection": null, "time_field": null, "timezone": null, "time_range": null,
+    "excluded": [], "deduplication_policy": null,
+    "holdout": {"split_policy": null, "training_recording_ids": [], "validation_recording_ids": [], "locked_card_version": null, "results": []}
+  },
+  "metrics": [],
+  "works": [{
+    "id": "replace_work", "creator_id": "replace_creator", "platform": null, "account_id": null, "url": null,
+    "platform_created_at": null, "published_at": null, "original_time_fields": {}, "timezone": null,
+    "topics": [], "duration_seconds": null, "source_group_id": null, "recording_id": null,
+    "repost_of": null, "split": null,
+    "materials": [{"kind": "transcript", "reference": null, "version": null, "sha256": null, "complete": null, "missing_reason": null}],
+    "speakers": [{"id": "replace_speaker", "is_creator": null, "attribution_basis": null}],
+    "opening": {"first_paragraph_modes": [], "direct_to_audience_question": null, "end_paragraph": null, "explicit_main_question": null},
+    "main_question": {"text": null, "origin": null, "paragraph": null},
+    "first_substantive_answer": {"paragraph": null, "kind": null, "locator": null, "missing_reason": null},
+    "paragraphs": [{"id": "p1", "number": 1, "start": null, "end": null, "locator": null, "speaker_id": null, "attribution_basis": null, "primary_function": null, "secondary_functions": [], "example_role": null, "evidence_type": "transcript", "material_version": null}],
+    "progression": [],
+    "ending": {"types": [], "promises": [{"promise": null, "opening_paragraph": null, "fulfillment": null, "answer_paragraphs": []}]},
+    "rule_annotations": [{"rule_id": "replace_rule", "result": null, "paragraph_ids": [], "reason": null}],
+    "reviews": [{"reviewer": null, "reviewed_at": null, "field": null, "before": null, "after": null, "reason": null}]
+  }],
+  "rules": [{
+    "id": "replace_rule", "status": "candidate", "topics": [], "conditions": [],
+    "opening": null, "body_functions": [], "answer_position": null, "ending": null,
+    "evidence_types": [], "support_count": null, "eligible_count": null, "unknown_count": null, "independent_recordings": null,
+    "support": [{"work_id": "replace_work", "paragraph_ids": [], "material_version": null, "evidence_type": null}],
+    "exceptions": [], "exceptions_status": "unknown", "holdout_result": null
+  }],
+  "missing": [],
+  "changes": [{"from_version": null, "reason": null, "added_rules": [], "changed_rules": [], "withdrawn_rules": []}]
+}

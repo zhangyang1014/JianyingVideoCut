@@ -1,0 +1,75 @@
+{
+  "$schema": "agent.validation_contract",
+  "contract_id": "goldenclip.translation_cues@1",
+  "mission_id": null,
+  "milestone_id": null,
+  "target": "translate.cues 的批量翻译结果（goldenclip.cue_translations@1）",
+  "assertions": [
+    {
+      "assertion_id": "TC-01",
+      "kind": "code",
+      "description": "输出是合法 JSON 数组，每项含 id、calibrated_text、translated_text",
+      "check": { "type": "json_schema", "params": { "items_required": ["id", "calibrated_text", "translated_text"] } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "TC-02",
+      "kind": "code",
+      "description": "id 集合与输入 cue 集合完全一致：无缺失、无新增、无重复（对应 calibrate_and_translate_cues 的 missing 检查）",
+      "check": { "type": "custom_fn", "params": { "fn": "check_cue_id_integrity" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "TC-03",
+      "kind": "code",
+      "description": "不可变字段未被改写：输出不包含 start/end/source_text 的新值",
+      "check": { "type": "immutable_fields", "params": { "fields": ["id", "start", "end", "source_text"] } },
+      "severity": "blocker",
+      "on_fail": "reject"
+    },
+    {
+      "assertion_id": "TC-04",
+      "kind": "code",
+      "description": "calibrated_text 与 translated_text 均非空（对应 validate_stage_translated）",
+      "check": { "type": "custom_fn", "params": { "fn": "check_nonempty_texts" } },
+      "severity": "blocker",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "TC-05",
+      "kind": "code",
+      "description": "译文长度粗筛：translated_text 预估朗读时长 > cue 时长 2 倍的条目占比 ≤ 10%",
+      "check": { "type": "range", "params": { "metric": "overlong_translation_ratio", "max": 0.1 } },
+      "severity": "major",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "TC-06",
+      "kind": "model",
+      "description": "calibrated_text 忠实于 source_text：只修错字口误标点，未增删观点",
+      "check": null,
+      "severity": "major",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "TC-07",
+      "kind": "model",
+      "description": "translated_text 完整传达校准文本语义，数字、单位、专有名词正确，术语前后一致",
+      "check": null,
+      "severity": "major",
+      "on_fail": "reject_and_retry"
+    },
+    {
+      "assertion_id": "TC-08",
+      "kind": "model",
+      "description": "译文口语可朗读，无书面腔堆砌（抽查长句）",
+      "check": null,
+      "severity": "minor",
+      "on_fail": "flag_for_human"
+    }
+  ],
+  "required_validators": ["validate.output"],
+  "pass_rule": "all_blockers_and_majors_pass"
+}

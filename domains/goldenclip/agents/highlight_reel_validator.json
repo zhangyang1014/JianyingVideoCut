@@ -1,0 +1,25 @@
+{
+  "$schema": "agent.manifest",
+  "agent_name": "highlight_reel_validator",
+  "version": "1.3.0",
+  "agent_type": "validation",
+  "capabilities": ["validate.highlight_reels"],
+  "input_schema": "goldenclip.highlight_reels_validation_request@3",
+  "output_schema": "goldenclip.highlight_reels_validation_result@3",
+  "prompt_layers": {
+    "base": "docs/agent-architecture/agents.md#通用基座-prompt第-1-层",
+    "role": "docs/agent-architecture/agents.md#7-validator-agent",
+    "domain_overlay": "domains/goldenclip/overlays/highlight_reel_validation.md"
+  },
+  "allowed_tools": ["read_task", "read_asr_result"],
+  "model_profile": {
+    "preferred": "validator_llm",
+    "fallback": [],
+    "temperature": 0.0,
+    "comment": "与 audit_llm 使用不同上下文；候选按 product_group+strategy 验收，最终执行 goldenclip.highlight_reels@3 单 winner 断言"
+  },
+  "risk_class": "decision",
+  "independence_requirements": ["audit.segments"],
+  "overrides": { "timeout_seconds": 180, "max_retries": 1 },
+  "enabled": true
+}
